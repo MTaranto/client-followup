@@ -1,0 +1,28 @@
+{{define "reports.html"}}
+{{template "page-header" .}}
+<section class="page-heading no-print">
+    <div><p class="eyebrow">Histórico completo</p><h1>Consulta / Relatórios</h1></div>
+    <button class="button primary" type="button" data-print>Exportar PDF</button>
+</section>
+<form id="report-filters" class="report-filters no-print"
+    hx-get="/reports/results" hx-target="#report-results" hx-swap="outerHTML"
+    hx-trigger="input changed delay:300ms, change">
+    <label class="field"><span>De</span><input type="date" name="date_from" value="{{.Filters.DateFrom}}"></label>
+    <label class="field"><span>Até</span><input type="date" name="date_to" value="{{.Filters.DateTo}}"></label>
+    <label class="field"><span>Cliente</span><input name="client" value="{{.Filters.Client}}"></label>
+    <label class="field"><span>Encaminhar para</span><input name="forward_to" value="{{.Filters.ForwardTo}}"></label>
+    <label class="field"><span>Prioridade</span><select name="priority">
+        <option value="">Todas</option><option value="HIGH" {{if eq .Filters.Priority "HIGH"}}selected{{end}}>Alta</option>
+        <option value="MEDIUM" {{if eq .Filters.Priority "MEDIUM"}}selected{{end}}>Média</option><option value="LOW" {{if eq .Filters.Priority "LOW"}}selected{{end}}>Baixa</option>
+    </select></label>
+    <label class="field"><span>Status</span><select name="status">
+        <option value="">Todos</option><option value="PENDING" {{if eq .Filters.Status "PENDING"}}selected{{end}}>Pendente</option>
+        <option value="COMPLETED" {{if eq .Filters.Status "COMPLETED"}}selected{{end}}>Finalizado</option>
+        <option value="ARCHIVED" {{if eq .Filters.Status "ARCHIVED"}}selected{{end}}>Arquivado</option>
+    </select></label>
+    <label class="check-field"><input type="checkbox" name="overdue" value="1" {{if .Filters.Overdue}}checked{{end}}> Somente atrasadas</label>
+    <a class="button ghost align-end" href="/reports">Limpar</a>
+</form>
+{{template "report-results.html" .}}
+{{template "page-footer" .}}
+{{end}}

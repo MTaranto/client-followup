@@ -1,0 +1,60 @@
+{{define "followup-form.html"}}
+<div class="modal-overlay" role="presentation">
+    <section class="modal-content wide" role="dialog" aria-modal="true" aria-labelledby="followup-form-title">
+        <header class="modal-header">
+            <div><p class="eyebrow">Cadastro</p><h2 id="followup-form-title">Nova pendência</h2></div>
+            <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
+        </header>
+        <form class="form-grid" hx-post="/followups" hx-target="#followup-form-message" hx-swap="innerHTML">
+            <div class="client-picker full-width">
+                <input type="hidden" name="client_id" id="client-id">
+                <label class="field">
+                    <span>Cliente *</span>
+                    <input id="client-name" name="client_name" required autocomplete="off" autofocus
+                        placeholder="Digite para buscar ou cadastrar"
+                        hx-get="/clients/search" hx-trigger="input changed delay:300ms, focus" hx-target="#client-suggestions">
+                </label>
+                <div id="client-suggestions" class="suggestions"></div>
+            </div>
+            <label class="field full-width">
+                <span>Contato</span>
+                <input id="client-contact" name="contact" autocomplete="off" placeholder="Telefone, e-mail ou outro contato">
+            </label>
+            <label class="field">
+                <span>Data de início *</span>
+                <input type="date" name="start_date" value="{{.Today}}" required>
+            </label>
+            <label class="field">
+                <span>Data limite *</span>
+                <input type="date" name="due_date" required>
+            </label>
+            <label class="field">
+                <span>Prioridade *</span>
+                <select name="priority" required>
+                    <option value="HIGH">Alta</option>
+                    <option value="MEDIUM" selected>Média</option>
+                    <option value="LOW">Baixa</option>
+                </select>
+            </label>
+            <label class="field full-width">
+                <span>Descrição *</span>
+                <textarea name="description" rows="3" required></textarea>
+            </label>
+            <label class="field full-width">
+                <span>Encaminhar para</span>
+                <input name="forward_to" autocomplete="off">
+            </label>
+            <label class="field full-width">
+                <span>Observação</span>
+                <textarea name="notes" rows="3" aria-describedby="privacy-note"></textarea>
+                <small id="privacy-note">Use apenas informações administrativas. Não registre dados clínicos ou médicos.</small>
+            </label>
+            <div id="followup-form-message" class="full-width" aria-live="polite"></div>
+            <footer class="form-actions full-width">
+                <button type="button" class="button ghost modal-close">Cancelar</button>
+                <button type="submit" class="button primary">Salvar pendência</button>
+            </footer>
+        </form>
+    </section>
+</div>
+{{end}}

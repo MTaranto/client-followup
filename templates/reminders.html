@@ -1,0 +1,20 @@
+{{define "reminders.html"}}
+<div class="modal-overlay" role="presentation">
+    <section class="modal-content reminder-modal" role="dialog" aria-modal="true" aria-labelledby="reminders-title">
+        <header class="modal-header">
+            <div><p class="eyebrow">Prazos que pedem atenção</p><h2 id="reminders-title">Alertas</h2></div>
+            <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
+        </header>
+        <div class="reminder-list">
+        {{range .Items}}
+            <button class="reminder-item {{.Alert.Kind}}" type="button"
+                hx-get="/clients/{{.ClientID}}?highlight={{.ID}}" hx-target="#modal-container" hx-swap="innerHTML">
+                <span class="reminder-main"><strong>{{.ClientName}}</strong><span>{{.Description}}</span></span>
+                <span class="reminder-meta"><span>{{formatDate .DueDate}}</span><span>{{priorityLabel .Priority}}</span><strong>{{.Alert.Label}}</strong></span>
+            </button>
+        {{end}}
+        </div>
+        <footer class="form-actions"><button type="button" class="button primary modal-close">Fechar</button></footer>
+    </section>
+</div>
+{{end}}

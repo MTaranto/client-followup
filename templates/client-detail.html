@@ -1,0 +1,36 @@
+{{define "client-detail.html"}}
+<div class="modal-overlay" role="presentation">
+    <section class="modal-content extra-wide" role="dialog" aria-modal="true" aria-labelledby="client-detail-title"
+        hx-get="/clients/{{.Client.ID}}" hx-trigger="followupsChanged from:body" hx-target="#modal-container" hx-swap="innerHTML">
+        <header class="modal-header">
+            <div><p class="eyebrow">Ficha da cliente</p><h2 id="client-detail-title">{{.Client.Name}}</h2></div>
+            <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
+        </header>
+        <form class="client-edit no-print" hx-post="/clients/{{.Client.ID}}" hx-target="#client-edit-message" hx-swap="innerHTML">
+            <label class="field"><span>Nome *</span><input name="name" value="{{.Client.Name}}" required></label>
+            <label class="field"><span>Contato</span><input name="contact" value="{{.Client.Contact}}"></label>
+            <button class="button secondary align-end" type="submit">Atualizar dados</button>
+            <div id="client-edit-message" aria-live="polite"></div>
+        </form>
+        <div class="table-scroll client-followups">
+            <table>
+                <thead><tr><th>Descrição</th><th>Encaminhar para</th><th>Prazo</th><th>Prioridade</th><th>Status</th><th>Ações</th></tr></thead>
+                <tbody>
+                {{range .FollowUps}}
+                    <tr id="followup-{{.ID}}" class="{{if eq $.HighlightID .ID}}highlighted{{end}} {{if eq .Alert.Kind "OVERDUE"}}overdue-row{{end}}">
+                        <td><strong>{{.Description}}</strong>{{if .Notes}}<small class="notes">{{.Notes}}</small>{{end}}</td>
+                        <td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
+                        <td>{{formatDate .DueDate}}{{if .Alert.Label}}<small class="deadline {{.Alert.Kind}}">{{.Alert.Label}}</small>{{end}}</td>
+                        <td><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
+                        <td><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
+                        <td class="actions">{{template "followup-actions.html" .}}</td>
+                    </tr>
+                {{else}}
+                    <tr><td colspan="6" class="empty-state">Não há pendências operacionais para esta cliente.</td></tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{{end}}

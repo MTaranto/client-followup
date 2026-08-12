@@ -1,0 +1,15 @@
+[Unit]
+Description=Client Follow-up local
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/client-followup
+ExecStart=%h/.local/share/client-followup/client-followup -addr 127.0.0.1:8080
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

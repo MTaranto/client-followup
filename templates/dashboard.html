@@ -1,0 +1,16 @@
+{{define "dashboard.html"}}
+{{template "page-header" .}}
+<section class="page-heading no-print">
+    <div>
+        <p class="eyebrow">Controle operacional</p>
+        <h1>Pendências de clientes</h1>
+    </div>
+    <button class="button primary" type="button"
+        hx-get="/followups/new" hx-target="#modal-container" hx-swap="innerHTML">
+        Nova pendência
+    </button>
+</section>
+{{template "dashboard-content.html" .}}
+<div hx-get="/reminders" hx-trigger="load" hx-target="#modal-container" hx-swap="innerHTML"></div>
+{{template "page-footer" .}}
+{{end}}

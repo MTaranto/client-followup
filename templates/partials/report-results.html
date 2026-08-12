@@ -1,0 +1,18 @@
+{{define "report-results.html"}}
+<section id="report-results" class="report-output">
+    <header class="print-header">
+        <h2>Relatório de pendências</h2>
+        <p>Emitido em {{.IssuedAt}} · {{len .Results}} registro(s)</p>
+    </header>
+    <div class="table-card"><div class="table-scroll"><table>
+        <thead><tr><th>Cliente</th><th>Descrição</th><th>Encaminhar para</th><th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
+        <tbody>
+        {{range .Results}}
+            <tr><td>{{.ClientName}}</td><td>{{.Description}}</td><td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td><td>{{formatDate .DueDate}}</td><td>{{priorityLabel .Priority}}</td><td>{{statusLabel .Status}}</td></tr>
+        {{else}}
+            <tr><td colspan="6" class="empty-state">Nenhum registro encontrado com estes filtros.</td></tr>
+        {{end}}
+        </tbody>
+    </table></div></div>
+</section>
+{{end}}

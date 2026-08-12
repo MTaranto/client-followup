@@ -1,0 +1,62 @@
+{{define "dashboard-content.html"}}
+<div id="dashboard-content"
+    hx-get="/dashboard?{{.Filters.Values.Encode}}"
+    hx-trigger="followupsChanged from:body"
+    hx-swap="outerHTML">
+    <section class="metrics" aria-label="Indicadores">
+        <button class="metric danger" hx-get="/dashboard?due=OVERDUE" hx-target="#dashboard-content" hx-swap="outerHTML">
+            <strong>{{.Counts.Overdue}}</strong><span>Atrasadas</span>
+        </button>
+        <button class="metric warning" hx-get="/dashboard?due=TODAY" hx-target="#dashboard-content" hx-swap="outerHTML">
+            <strong>{{.Counts.Today}}</strong><span>Vencem hoje</span>
+        </button>
+        <button class="metric attention" hx-get="/dashboard?due=TOMORROW" hx-target="#dashboard-content" hx-swap="outerHTML">
+            <strong>{{.Counts.Tomorrow}}</strong><span>Vencem amanhã</span>
+        </button>
+        <button class="metric" hx-get="/dashboard?status=PENDING" hx-target="#dashboard-content" hx-swap="outerHTML">
+            <strong>{{.Counts.Pending}}</strong><span>Pendentes</span>
+        </button>
+        <button class="metric success" hx-get="/dashboard?status=COMPLETED" hx-target="#dashboard-content" hx-swap="outerHTML">
+            <strong>{{.Counts.Completed}}</strong><span>Finalizadas</span>
+        </button>
+    </section>
+
+    <form id="dashboard-filters" class="filter-bar no-print"
+        hx-get="/dashboard" hx-target="#dashboard-content" hx-swap="outerHTML"
+        hx-trigger="input changed delay:300ms, change">
+        <label class="field grow">
+            <span>Busca</span>
+            <input type="search" name="q" value="{{.Filters.Query}}" placeholder="Cliente, descrição ou encaminhamento" autocomplete="off">
+        </label>
+        <label class="field">
+            <span>Prioridade</span>
+            <select name="priority">
+                <option value="">Todas</option>
+                <option value="HIGH" {{if eq .Filters.Priority "HIGH"}}selected{{end}}>Alta</option>
+                <option value="MEDIUM" {{if eq .Filters.Priority "MEDIUM"}}selected{{end}}>Média</option>
+                <option value="LOW" {{if eq .Filters.Priority "LOW"}}selected{{end}}>Baixa</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Status</span>
+            <select name="status">
+                <option value="">Todos</option>
+                <option value="PENDING" {{if eq .Filters.Status "PENDING"}}selected{{end}}>Pendente</option>
+                <option value="COMPLETED" {{if eq .Filters.Status "COMPLETED"}}selected{{end}}>Finalizado</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Prazo</span>
+            <select name="due">
+                <option value="">Todos</option>
+                <option value="OVERDUE" {{if eq .Filters.Due "OVERDUE"}}selected{{end}}>Atrasadas</option>
+                <option value="TODAY" {{if eq .Filters.Due "TODAY"}}selected{{end}}>Vencem hoje</option>
+                <option value="TOMORROW" {{if eq .Filters.Due "TOMORROW"}}selected{{end}}>Vencem amanhã</option>
+            </select>
+        </label>
+        <a class="button ghost align-end" href="/">Limpar</a>
+    </form>
+
+    {{template "followup-table.html" .}}
+</div>
+{{end}}

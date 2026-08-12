@@ -1,0 +1,29 @@
+{{define "page-header"}}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Client Follow-up</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+    <header class="site-header no-print">
+        <a class="brand" href="/">Client Follow-up</a>
+        <nav aria-label="Navegação principal">
+            <a href="/">Painel</a>
+            <a href="/reports">Consulta / Relatórios</a>
+        </nav>
+    </header>
+    <main class="page-shell">
+{{end}}
+
+{{define "page-footer"}}
+    </main>
+    <div id="flash" class="flash-region" aria-live="polite"></div>
+    <div id="modal-container"></div>
+</body>
+</html>
+{{end}}

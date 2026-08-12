@@ -1,0 +1,8 @@
+/client-followup
+/data/*.db
+/data/*.db-shm
+/data/*.db-wal
+/backups/*.db
+/.idea/
+/.vscode/
+*.log
