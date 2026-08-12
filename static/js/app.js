@@ -31,6 +31,32 @@
         }
     }
 
+    function clearSuggestions() {
+        const suggestions = document.getElementById("client-suggestions");
+        if (suggestions) {
+            suggestions.replaceChildren();
+        }
+    }
+
+    function invalidateClientSelection(nameInput) {
+        const idInput = document.getElementById("client-id");
+        const contactInput = document.getElementById("client-contact");
+        if (!idInput || !contactInput || !idInput.value) {
+            return;
+        }
+        if (nameInput.value === nameInput.dataset.selectedClientName) {
+            return;
+        }
+
+        idInput.value = "";
+        if (contactInput.dataset.autofilledContact !== undefined &&
+                contactInput.value === contactInput.dataset.autofilledContact) {
+            contactInput.value = "";
+        }
+        delete nameInput.dataset.selectedClientName;
+        delete contactInput.dataset.autofilledContact;
+    }
+
     document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") {
             closeModal();
@@ -52,7 +78,9 @@
                 idInput.value = suggestion.dataset.clientId;
                 nameInput.value = suggestion.dataset.clientName;
                 contactInput.value = suggestion.dataset.clientContact;
-                document.getElementById("client-suggestions").replaceChildren();
+                nameInput.dataset.selectedClientName = suggestion.dataset.clientName;
+                contactInput.dataset.autofilledContact = suggestion.dataset.clientContact;
+                clearSuggestions();
                 contactInput.focus();
             }
             return;
@@ -65,10 +93,22 @@
 
     document.addEventListener("input", function (event) {
         if (event.target.id === "client-name") {
-            const idInput = document.getElementById("client-id");
-            if (idInput) {
-                idInput.value = "";
+            invalidateClientSelection(event.target);
+            if (!event.target.value.trim()) {
+                clearSuggestions();
             }
+        }
+        if (event.target.id === "client-contact" &&
+                event.target.dataset.autofilledContact !== undefined &&
+                event.target.value !== event.target.dataset.autofilledContact) {
+            delete event.target.dataset.autofilledContact;
+        }
+    });
+
+    document.addEventListener("htmx:beforeRequest", function (event) {
+        if (event.detail.elt.id === "client-name" && !event.detail.elt.value.trim()) {
+            event.preventDefault();
+            clearSuggestions();
         }
     });
 

@@ -131,8 +131,8 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 	}
 
 	if clientID > 0 {
-		var existingName string
-		if err := transaction.QueryRow("SELECT name FROM clients WHERE id = ?", clientID).Scan(&existingName); err != nil {
+		var existingID int64
+		if err := transaction.QueryRow("SELECT id FROM clients WHERE id = ?", clientID).Scan(&existingID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return 0, errors.New("cliente selecionada não foi encontrada")
 			}
@@ -142,20 +142,6 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 			return 0, fmt.Errorf("atualizar contato da cliente: %w", err)
 		}
 		return clientID, nil
-	}
-
-	var existingID int64
-	err := transaction.QueryRow("SELECT id FROM clients WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1", name).Scan(&existingID)
-	if err == nil {
-		if contact != "" {
-			if _, err := transaction.Exec("UPDATE clients SET contact = ?, updated_at = ? WHERE id = ?", contact, store.now(), existingID); err != nil {
-				return 0, fmt.Errorf("atualizar contato da cliente: %w", err)
-			}
-		}
-		return existingID, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("buscar cliente: %w", err)
 	}
 
 	now := store.now()

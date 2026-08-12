@@ -90,6 +90,32 @@ func TestFollowUpHTTPWorkflow(t *testing.T) {
 	assertResponseContains(t, response, "Confirmar retorno", "Arquivado")
 }
 
+func TestClientSuggestionsDistinguishHomonymousClients(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	withContact, err := store.createClient("Ana Silva", "ana@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutContact, err := store.createClient("Ana Silva", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(app.routes(), http.MethodGet, "/clients/search?client_name=Ana", nil)
+	assertResponseContains(
+		t,
+		response,
+		`data-client-id="`+strconv.FormatInt(withContact.ID, 10)+`"`,
+		"ana@example.com",
+		`data-client-id="`+strconv.FormatInt(withoutContact.ID, 10)+`"`,
+		"Cadastro #"+strconv.FormatInt(withoutContact.ID, 10),
+	)
+}
+
 func performRequest(handler http.Handler, method, target string, form url.Values) *httptest.ResponseRecorder {
 	var body *strings.Reader
 	if form == nil {

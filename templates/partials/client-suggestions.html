@@ -1,7 +1,8 @@
 {{define "client-suggestions.html"}}
 {{range .}}
 <button type="button" class="suggestion" data-client-id="{{.ID}}" data-client-name="{{.Name}}" data-client-contact="{{.Contact}}">
-    <strong>{{.Name}}</strong>{{if .Contact}}<span>{{.Contact}}</span>{{end}}
+    <strong>{{.Name}}</strong>
+    {{if .Contact}}<span>{{.Contact}}</span>{{else if .ShowID}}<span>Cadastro #{{.ID}}</span>{{end}}
 </button>
 {{else}}
 <p class="suggestion-empty">Nenhuma cliente encontrada. O novo nome será cadastrado ao salvar.</p>
