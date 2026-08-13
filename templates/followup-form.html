@@ -5,23 +5,28 @@
             <div><p class="eyebrow">Cadastro</p><h2 id="followup-form-title">Nova pendência</h2></div>
             <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
         </header>
-        <form class="form-grid" hx-post="/followups" hx-target="#followup-form-message" hx-swap="innerHTML">
-            <div class="client-picker full-width">
-                <input type="hidden" name="client_id" id="client-id">
+        <form id="followup-form" class="form-grid" hx-post="/followups" hx-target="#followup-form-message" hx-swap="innerHTML">
+            <div class="full-width">
+                <input type="hidden" name="client_id" id="client-id" value="{{if .ClientID}}{{.ClientID}}{{end}}">
+                <input type="hidden" name="phone_change_action" id="phone-change-action">
                 <label class="field">
                     <span>Cliente *</span>
-                    <input id="client-name" name="client_name" required autocomplete="off" autofocus
-                        placeholder="Digite para buscar ou cadastrar"
-                        hx-get="/clients/search" hx-trigger="input, focus" hx-target="#client-suggestions">
+                    <input id="client-name" name="client_name" value="{{.ClientName}}" required autocomplete="off" autofocus
+                        placeholder="Digite o nome completo"
+                        {{if .ClientID}}data-selected-client-name="{{.ClientName}}"{{end}}>
                 </label>
-                <div id="client-suggestions" class="suggestions"></div>
             </div>
+            <div id="client-match-choice" class="client-match-choice full-width" aria-live="polite"></div>
             <label class="field full-width">
                 <span>Telefone *</span>
-                <input id="client-contact" name="contact" data-phone-input required autocomplete="tel" inputmode="numeric"
+                <input id="client-contact" name="contact" value="{{.Contact}}" data-phone-input required autocomplete="tel" inputmode="numeric"
                     pattern="\([0-9]{2}\) [0-9]{5}-[0-9]{4}" placeholder="(00) 00000-0000"
-                    title="Informe um celular com DDD no formato (00) 00000-0000">
+                    title="Informe um celular com DDD no formato (00) 00000-0000"
+                    hx-get="/clients/phone-change-confirmation" hx-trigger="change"
+                    hx-target="#phone-change-confirmation" hx-swap="innerHTML" hx-include="closest form"
+                    {{if .ClientID}}data-autofilled-contact="{{.Contact}}"{{end}}>
             </label>
+            <div id="phone-change-confirmation" class="full-width" aria-live="polite"></div>
             <label class="field">
                 <span>Data de início *</span>
                 <input type="date" name="start_date" value="{{.Today}}" required>

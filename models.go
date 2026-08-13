@@ -109,7 +109,10 @@ type DashboardView struct {
 }
 
 type FollowUpFormView struct {
-	Today string
+	Today      string
+	ClientID   int64
+	ClientName string
+	Contact    string
 }
 
 type ClientPhoneConfirmationView struct {

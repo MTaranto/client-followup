@@ -1,0 +1,10 @@
+{{define "client-search-results.html"}}
+{{range .}}
+<button type="button" class="client-search-result"
+    hx-get="/followups/new?client_id={{.ID}}" hx-target="#modal-container" hx-swap="innerHTML">
+    <strong>{{.Name}}</strong>
+    {{if .Contact}}<span>{{.Contact}}</span>{{else if .ShowID}}<span>Cadastro #{{.ID}}</span>{{end}}
+</button>
+{{else}}
+{{end}}
+{{end}}

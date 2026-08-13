@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -20,9 +21,15 @@ type Application struct {
 	now       func() time.Time
 }
 
-type clientSuggestion struct {
+type dashboardClientResult struct {
 	Client
 	ShowID bool
+}
+
+type clientMatch struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Contact string `json:"contact"`
 }
 
 func newApplication(store *Store, location *time.Location) (*Application, error) {
@@ -61,6 +68,8 @@ func (app *Application) routes() http.Handler {
 	mux.HandleFunc("POST /followups/{id}/reopen", app.reopenFollowUp)
 	mux.HandleFunc("POST /followups/{id}/archive", app.archiveFollowUp)
 	mux.HandleFunc("GET /clients/search", app.searchClients)
+	mux.HandleFunc("GET /clients/exact", app.exactClients)
+	mux.HandleFunc("GET /clients/phone-change-confirmation", app.phoneChangeConfirmation)
 	mux.HandleFunc("GET /clients/{id}", app.clientDetail)
 	mux.HandleFunc("POST /clients/{id}", app.updateClient)
 	mux.HandleFunc("GET /reminders", app.reminders)
@@ -171,10 +180,31 @@ func (app *Application) dashboardView(r *http.Request) (DashboardView, error) {
 	return DashboardView{Today: today, Filters: filters, Counts: counts, FollowUps: items}, nil
 }
 
-func (app *Application) followUpForm(w http.ResponseWriter, _ *http.Request) {
-	app.render(w, http.StatusOK, "followup-form.html", FollowUpFormView{
-		Today: app.now().In(app.location).Format("2006-01-02"),
-	})
+func (app *Application) followUpForm(w http.ResponseWriter, r *http.Request) {
+	view := FollowUpFormView{
+		Today:      app.now().In(app.location).Format("2006-01-02"),
+		ClientName: normalizeText(r.URL.Query().Get("client_name")),
+	}
+	if value := r.URL.Query().Get("client_id"); value != "" {
+		clientID, err := parseID(value)
+		if err != nil {
+			app.renderError(w, "Selecione novamente a cliente.", http.StatusBadRequest)
+			return
+		}
+		client, err := app.store.getClient(clientID)
+		if errors.Is(err, sql.ErrNoRows) {
+			app.renderError(w, "Cliente não encontrada.", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			app.renderError(w, "Não foi possível abrir o cadastro da pendência.", http.StatusInternalServerError)
+			return
+		}
+		view.ClientID = client.ID
+		view.ClientName = client.Name
+		view.Contact = client.Contact
+	}
+	app.render(w, http.StatusOK, "followup-form.html", view)
 }
 
 func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +284,7 @@ func (app *Application) changeFollowUpStatus(w http.ResponseWriter, r *http.Requ
 func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
 	query := normalizeText(r.URL.Query().Get("client_name"))
 	if query == "" {
-		w.WriteHeader(http.StatusNoContent)
+		app.render(w, http.StatusOK, "client-search-results.html", []dashboardClientResult{})
 		return
 	}
 	clients, err := app.store.searchClients(query)
@@ -262,23 +292,69 @@ func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, "Não foi possível pesquisar clientes.", http.StatusInternalServerError)
 		return
 	}
-	app.render(w, http.StatusOK, "client-suggestions.html", clientSuggestions(clients))
+	app.render(w, http.StatusOK, "client-search-results.html", dashboardClientResults(clients))
 }
 
-func clientSuggestions(clients []Client) []clientSuggestion {
+func (app *Application) exactClients(w http.ResponseWriter, r *http.Request) {
+	clients, err := app.store.findClientsByExactName(r.URL.Query().Get("client_name"))
+	if err != nil {
+		http.Error(w, "Não foi possível verificar a cliente.", http.StatusInternalServerError)
+		return
+	}
+	matches := make([]clientMatch, 0, len(clients))
+	for _, client := range clients {
+		matches = append(matches, clientMatch{ID: client.ID, Name: client.Name, Contact: client.Contact})
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(struct {
+		Clients []clientMatch `json:"clients"`
+	}{Clients: matches}); err != nil {
+		log.Printf("renderizar correspondências exatas: %v", err)
+	}
+}
+
+func (app *Application) phoneChangeConfirmation(w http.ResponseWriter, r *http.Request) {
+	clientID, err := parseID(r.URL.Query().Get("client_id"))
+	if err != nil {
+		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
+		return
+	}
+	client, err := app.store.getClient(clientID)
+	if err != nil || !strings.EqualFold(normalizeText(client.Name), normalizeText(r.URL.Query().Get("client_name"))) {
+		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
+		return
+	}
+	submittedPhone, err := normalizePhone(r.URL.Query().Get("contact"))
+	if err != nil {
+		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
+		return
+	}
+	currentPhone, err := normalizePhone(client.Contact)
+	if err == nil && currentPhone == submittedPhone {
+		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
+		return
+	}
+	app.render(w, http.StatusOK, "client-phone-confirmation.html", ClientPhoneConfirmationView{
+		Name:           client.Name,
+		CurrentPhone:   client.Contact,
+		SubmittedPhone: submittedPhone,
+	})
+}
+
+func dashboardClientResults(clients []Client) []dashboardClientResult {
 	nameCounts := make(map[string]int, len(clients))
 	for _, client := range clients {
 		nameCounts[strings.ToLower(client.Name)]++
 	}
 
-	suggestions := make([]clientSuggestion, 0, len(clients))
+	results := make([]dashboardClientResult, 0, len(clients))
 	for _, client := range clients {
-		suggestions = append(suggestions, clientSuggestion{
+		results = append(results, dashboardClientResult{
 			Client: client,
 			ShowID: client.Contact == "" && nameCounts[strings.ToLower(client.Name)] > 1,
 		})
 	}
-	return suggestions
+	return results
 }
 
 func (app *Application) clientDetail(w http.ResponseWriter, r *http.Request) {

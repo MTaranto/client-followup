@@ -157,7 +157,7 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 			}
 			return 0, fmt.Errorf("consultar cliente: %w", err)
 		}
-		if !strings.EqualFold(existing.Name, name) {
+		if !strings.EqualFold(normalizeText(existing.Name), name) {
 			return 0, errors.New("o nome não corresponde à cliente selecionada; selecione novamente")
 		}
 
@@ -318,6 +318,30 @@ func (store *Store) searchClients(query string) ([]Client, error) {
 	term := "%" + normalizeText(query) + "%"
 	rows, err := store.db.Query(`SELECT id, name, contact, created_at, updated_at FROM clients
 		WHERE name LIKE ? COLLATE NOCASE ORDER BY name, id LIMIT 8`, term)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	clients := []Client{}
+	for rows.Next() {
+		var client Client
+		if err := rows.Scan(&client.ID, &client.Name, &client.Contact, &client.CreatedAt, &client.UpdatedAt); err != nil {
+			return nil, err
+		}
+		clients = append(clients, client)
+	}
+	return clients, rows.Err()
+}
+
+func (store *Store) findClientsByExactName(name string) ([]Client, error) {
+	name = normalizeText(name)
+	if name == "" {
+		return []Client{}, nil
+	}
+
+	rows, err := store.db.Query(`SELECT id, name, contact, created_at, updated_at FROM clients
+		WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 8`, name)
 	if err != nil {
 		return nil, err
 	}

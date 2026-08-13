@@ -5,9 +5,9 @@ Aplicação local para controle das pendências de clientes da Roberta. O MVP us
 ## O que está implementado
 
 - cadastro de cliente no mesmo fluxo da nova pendência;
-- busca incremental por nome e preenchimento automático do telefone;
+- busca incremental de clientes no painel e autofill exato no cadastro de pendência;
 - datas de início e limite, prioridade, descrição, encaminhamento e observação;
-- painel com indicadores, busca e filtros operacionais;
+- painel com indicadores, busca de clientes e tabela operacional de pendências;
 - ficha da cliente com edição de nome/telefone e pendências não arquivadas;
 - fluxo `PENDING → COMPLETED → PENDING` e `COMPLETED → ARCHIVED`;
 - alertas únicos para atrasadas, vencimento hoje e amanhã, com acesso e destaque da pendência;

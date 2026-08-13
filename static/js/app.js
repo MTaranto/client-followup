@@ -1,6 +1,8 @@
 (function () {
     "use strict";
 
+    let exactLookupSequence = 0;
+
     function modalContainer() {
         return document.getElementById("modal-container");
     }
@@ -17,9 +19,10 @@
         const container = modalContainer();
         const modal = container && container.querySelector(".modal-overlay");
         document.body.classList.toggle("modal-open", Boolean(modal));
-        if (!modal) {
+        if (!modal || modal.dataset.prepared === "true") {
             return;
         }
+        modal.dataset.prepared = "true";
 
         modal.querySelectorAll("[data-phone-input]").forEach(formatPhoneInput);
         const autofocus = modal.querySelector("[autofocus]");
@@ -32,10 +35,26 @@
         }
     }
 
-    function clearSuggestions() {
-        const suggestions = document.getElementById("client-suggestions");
-        if (suggestions) {
-            suggestions.replaceChildren();
+    function normalizeName(value) {
+        return value.trim().toLocaleLowerCase("pt-BR");
+    }
+
+    function clearClientMatches(form) {
+        const matches = form && form.querySelector("#client-match-choice");
+        if (matches) {
+            matches.replaceChildren();
+        }
+    }
+
+    function clearPhoneDecision(form) {
+        const actionInput = form && form.querySelector("#phone-change-action");
+        const confirmation = form && form.querySelector("#phone-change-confirmation");
+        if (actionInput) {
+            actionInput.value = "";
+            delete actionInput.dataset.phoneChangeValue;
+        }
+        if (confirmation) {
+            confirmation.replaceChildren();
         }
     }
 
@@ -79,12 +98,13 @@
     }
 
     function invalidateClientSelection(nameInput) {
-        const idInput = document.getElementById("client-id");
-        const contactInput = document.getElementById("client-contact");
+        const form = nameInput.closest("form");
+        const idInput = form && form.querySelector("#client-id");
+        const contactInput = form && form.querySelector("#client-contact");
         if (!idInput || !contactInput || !idInput.value) {
             return;
         }
-        if (nameInput.value === nameInput.dataset.selectedClientName) {
+        if (normalizeName(nameInput.value) === normalizeName(nameInput.dataset.selectedClientName || "")) {
             return;
         }
 
@@ -95,6 +115,123 @@
         }
         delete nameInput.dataset.selectedClientName;
         delete contactInput.dataset.autofilledContact;
+        clearPhoneDecision(form);
+    }
+
+    function selectClient(form, client, preserveManualContact) {
+        const idInput = form.querySelector("#client-id");
+        const nameInput = form.querySelector("#client-name");
+        const contactInput = form.querySelector("#client-contact");
+        if (!idInput || !nameInput || !contactInput) {
+            return;
+        }
+
+        idInput.value = String(client.id);
+        nameInput.value = client.name;
+        nameInput.dataset.selectedClientName = client.name;
+        if (!preserveManualContact || !contactInput.value) {
+            contactInput.value = client.contact;
+            formatPhoneInput(contactInput);
+            contactInput.dataset.autofilledContact = contactInput.value;
+        } else {
+            delete contactInput.dataset.autofilledContact;
+        }
+        clearClientMatches(form);
+        clearPhoneDecision(form);
+    }
+
+    function chooseNewHomonymousClient(form) {
+        const idInput = form.querySelector("#client-id");
+        const nameInput = form.querySelector("#client-name");
+        const contactInput = form.querySelector("#client-contact");
+        if (!idInput || !nameInput || !contactInput) {
+            return;
+        }
+        idInput.value = "";
+        if (contactInput.dataset.autofilledContact !== undefined &&
+                contactInput.value === contactInput.dataset.autofilledContact) {
+            contactInput.value = "";
+        }
+        delete nameInput.dataset.selectedClientName;
+        delete contactInput.dataset.autofilledContact;
+        clearClientMatches(form);
+        clearPhoneDecision(form);
+        contactInput.focus();
+    }
+
+    function renderClientMatches(form, clients) {
+        const container = form.querySelector("#client-match-choice");
+        if (!container) {
+            return;
+        }
+
+        const panel = document.createElement("div");
+        panel.className = "client-match-panel";
+        const message = document.createElement("p");
+        message.textContent = "Existe mais de uma cliente com este nome. Escolha o telefone correto:";
+        panel.appendChild(message);
+
+        clients.forEach(function (client) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "button secondary client-match-option";
+            button.textContent = client.contact || "Cliente sem telefone cadastrado";
+            button.dataset.clientId = String(client.id);
+            button.dataset.clientName = client.name;
+            button.dataset.clientContact = client.contact;
+            panel.appendChild(button);
+        });
+
+        const newClientButton = document.createElement("button");
+        newClientButton.type = "button";
+        newClientButton.className = "button ghost client-match-new";
+        newClientButton.textContent = "Cadastrar nova cliente com este nome";
+        panel.appendChild(newClientButton);
+        container.replaceChildren(panel);
+    }
+
+    function verifyExactClient(nameInput) {
+        const form = nameInput.closest("form");
+        if (!form || form.id !== "followup-form") {
+            return;
+        }
+        clearClientMatches(form);
+        const requestedName = nameInput.value.trim();
+        if (!requestedName) {
+            return;
+        }
+
+        const contactInput = form.querySelector("#client-contact");
+        const contactAtRequest = contactInput ? contactInput.value : "";
+        const requestSequence = ++exactLookupSequence;
+        fetch("/clients/exact?client_name=" + encodeURIComponent(requestedName), {
+            headers: { "Accept": "application/json" }
+        }).then(function (response) {
+            if (!response.ok) {
+                throw new Error("client lookup failed");
+            }
+            return response.json();
+        }).then(function (payload) {
+            if (requestSequence !== exactLookupSequence || !form.isConnected ||
+                    normalizeName(nameInput.value) !== normalizeName(requestedName)) {
+                return;
+            }
+            const clients = Array.isArray(payload.clients) ? payload.clients : [];
+            if (clients.length === 1) {
+                const contactWasEdited = contactInput && contactInput.value !== contactAtRequest;
+                selectClient(form, clients[0], contactWasEdited);
+            } else if (clients.length > 1) {
+                renderClientMatches(form, clients);
+            }
+        }).catch(function () {
+            const message = form.querySelector("#followup-form-message");
+            if (message && requestSequence === exactLookupSequence) {
+                const error = document.createElement("div");
+                error.className = "message error";
+                error.textContent = "Não foi possível verificar a cliente agora. Você ainda pode preencher e salvar normalmente.";
+                message.replaceChildren(error);
+            }
+        });
     }
 
     document.addEventListener("keydown", function (event) {
@@ -109,20 +246,33 @@
             return;
         }
 
-        const suggestion = event.target.closest(".suggestion");
-        if (suggestion) {
-            const idInput = document.getElementById("client-id");
-            const nameInput = document.getElementById("client-name");
-            const contactInput = document.getElementById("client-contact");
-            if (idInput && nameInput && contactInput) {
-                idInput.value = suggestion.dataset.clientId;
-                nameInput.value = suggestion.dataset.clientName;
-                contactInput.value = suggestion.dataset.clientContact;
-                formatPhoneInput(contactInput);
-                nameInput.dataset.selectedClientName = suggestion.dataset.clientName;
-                contactInput.dataset.autofilledContact = contactInput.value;
-                clearSuggestions();
-                contactInput.focus();
+        const clientMatch = event.target.closest(".client-match-option");
+        if (clientMatch) {
+            const form = clientMatch.closest("form");
+            selectClient(form, {
+                id: clientMatch.dataset.clientId,
+                name: clientMatch.dataset.clientName,
+                contact: clientMatch.dataset.clientContact
+            }, false);
+            form.querySelector("#client-contact").focus();
+            return;
+        }
+
+        const newClient = event.target.closest(".client-match-new");
+        if (newClient) {
+            chooseNewHomonymousClient(newClient.closest("form"));
+            return;
+        }
+
+        const phoneDecision = event.target.closest("[data-phone-change-action]");
+        if (phoneDecision) {
+            const form = phoneDecision.closest("form");
+            const actionInput = form && form.querySelector("#phone-change-action");
+            const contactInput = form && form.querySelector("#client-contact");
+            if (actionInput && contactInput) {
+                actionInput.value = phoneDecision.dataset.phoneChangeAction;
+                actionInput.dataset.phoneChangeValue = contactInput.value;
+                phoneDecision.closest(".phone-confirmation").remove();
             }
             return;
         }
@@ -138,37 +288,36 @@
         }
         if (event.target.id === "client-name") {
             invalidateClientSelection(event.target);
-            if (!event.target.value.trim()) {
-                clearSuggestions();
-            }
+            clearClientMatches(event.target.closest("form"));
         }
-        if (event.target.id === "client-contact" &&
-                event.target.dataset.autofilledContact !== undefined &&
-                event.target.value !== event.target.dataset.autofilledContact) {
-            delete event.target.dataset.autofilledContact;
+        if (event.target.id === "client-contact") {
+            const form = event.target.closest("form");
+            const actionInput = form && form.querySelector("#phone-change-action");
+            if (actionInput && actionInput.value &&
+                    event.target.value !== actionInput.dataset.phoneChangeValue) {
+                clearPhoneDecision(form);
+            } else {
+                const confirmation = form && form.querySelector("#phone-change-confirmation");
+                if (confirmation) {
+                    confirmation.replaceChildren();
+                }
+            }
+            if (event.target.dataset.autofilledContact !== undefined &&
+                    event.target.value !== event.target.dataset.autofilledContact) {
+                delete event.target.dataset.autofilledContact;
+            }
         }
     });
 
-    document.addEventListener("htmx:beforeRequest", function (event) {
-        if (event.detail.elt.id === "client-name" && !event.detail.elt.value.trim()) {
-            event.preventDefault();
-            clearSuggestions();
+    document.addEventListener("change", function (event) {
+        if (event.target.id === "client-name") {
+            verifyExactClient(event.target);
         }
     });
 
     document.body.addEventListener("closeModal", closeModal);
     document.body.addEventListener("htmx:afterSwap", prepareModal);
     document.body.addEventListener("htmx:beforeSwap", function (event) {
-        if (event.detail.target.id === "client-suggestions") {
-            const idInput = document.getElementById("client-id");
-            const nameInput = document.getElementById("client-name");
-            if (idInput && idInput.value && nameInput &&
-                    nameInput.value === nameInput.dataset.selectedClientName) {
-                event.detail.shouldSwap = false;
-                clearSuggestions();
-                return;
-            }
-        }
         const status = event.detail.xhr.status;
         if (status >= 400 && status < 500) {
             event.detail.shouldSwap = true;
