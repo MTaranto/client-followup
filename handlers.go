@@ -53,6 +53,8 @@ func (app *Application) routes() http.Handler {
 	mux.HandleFunc("GET /health", app.health)
 	mux.HandleFunc("GET /{$}", app.dashboardPage)
 	mux.HandleFunc("GET /dashboard", app.dashboardContent)
+	mux.HandleFunc("GET /dashboard/results", app.dashboardResults)
+	mux.HandleFunc("GET /dashboard/metrics", app.dashboardMetrics)
 	mux.HandleFunc("GET /followups/new", app.followUpForm)
 	mux.HandleFunc("POST /followups", app.createFollowUp)
 	mux.HandleFunc("POST /followups/{id}/complete", app.completeFollowUp)
@@ -128,6 +130,24 @@ func (app *Application) dashboardContent(w http.ResponseWriter, r *http.Request)
 	app.render(w, http.StatusOK, "dashboard-content.html", view)
 }
 
+func (app *Application) dashboardResults(w http.ResponseWriter, r *http.Request) {
+	view, err := app.dashboardView(r)
+	if err != nil {
+		app.renderError(w, "Não foi possível atualizar o painel.", http.StatusInternalServerError)
+		return
+	}
+	app.render(w, http.StatusOK, "dashboard-results.html", view)
+}
+
+func (app *Application) dashboardMetrics(w http.ResponseWriter, r *http.Request) {
+	view, err := app.dashboardView(r)
+	if err != nil {
+		app.renderError(w, "Não foi possível atualizar os indicadores.", http.StatusInternalServerError)
+		return
+	}
+	app.render(w, http.StatusOK, "dashboard-metrics.html", view)
+}
+
 func (app *Application) dashboardView(r *http.Request) (DashboardView, error) {
 	filters := DashboardFilters{
 		Query:    normalizeText(r.URL.Query().Get("q")),
@@ -182,8 +202,18 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("forward_to"),
 		r.FormValue("priority"),
 		r.FormValue("notes"),
+		r.FormValue("phone_change_action"),
 	)
 	if err != nil {
+		var phoneChange *clientPhoneChangeRequiredError
+		if errors.As(err, &phoneChange) {
+			app.render(w, http.StatusConflict, "client-phone-confirmation.html", ClientPhoneConfirmationView{
+				Name:           phoneChange.Client.Name,
+				CurrentPhone:   phoneChange.Client.Contact,
+				SubmittedPhone: phoneChange.SubmittedPhone,
+			})
+			return
+		}
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}

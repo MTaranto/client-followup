@@ -1,0 +1,20 @@
+{{define "dashboard-metrics.html"}}
+<section id="dashboard-metrics" class="metrics" aria-label="Indicadores"
+    hx-get="/dashboard/metrics" hx-trigger="followupsChanged from:body" hx-swap="outerHTML">
+    <button class="metric danger" hx-get="/dashboard?due=OVERDUE" hx-target="#dashboard-content" hx-swap="outerHTML">
+        <strong>{{.Counts.Overdue}}</strong><span>Atrasadas</span>
+    </button>
+    <button class="metric warning" hx-get="/dashboard?due=TODAY" hx-target="#dashboard-content" hx-swap="outerHTML">
+        <strong>{{.Counts.Today}}</strong><span>Vencem hoje</span>
+    </button>
+    <button class="metric attention" hx-get="/dashboard?due=TOMORROW" hx-target="#dashboard-content" hx-swap="outerHTML">
+        <strong>{{.Counts.Tomorrow}}</strong><span>Vencem amanhã</span>
+    </button>
+    <button class="metric" hx-get="/dashboard?status=PENDING" hx-target="#dashboard-content" hx-swap="outerHTML">
+        <strong>{{.Counts.Pending}}</strong><span>Pendentes</span>
+    </button>
+    <button class="metric success" hx-get="/dashboard?status=COMPLETED" hx-target="#dashboard-content" hx-swap="outerHTML">
+        <strong>{{.Counts.Completed}}</strong><span>Finalizadas</span>
+    </button>
+</section>
+{{end}}

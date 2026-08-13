@@ -1,29 +1,10 @@
 {{define "dashboard-content.html"}}
-<div id="dashboard-content"
-    hx-get="/dashboard?{{.Filters.Values.Encode}}"
-    hx-trigger="followupsChanged from:body"
-    hx-swap="outerHTML">
-    <section class="metrics" aria-label="Indicadores">
-        <button class="metric danger" hx-get="/dashboard?due=OVERDUE" hx-target="#dashboard-content" hx-swap="outerHTML">
-            <strong>{{.Counts.Overdue}}</strong><span>Atrasadas</span>
-        </button>
-        <button class="metric warning" hx-get="/dashboard?due=TODAY" hx-target="#dashboard-content" hx-swap="outerHTML">
-            <strong>{{.Counts.Today}}</strong><span>Vencem hoje</span>
-        </button>
-        <button class="metric attention" hx-get="/dashboard?due=TOMORROW" hx-target="#dashboard-content" hx-swap="outerHTML">
-            <strong>{{.Counts.Tomorrow}}</strong><span>Vencem amanhã</span>
-        </button>
-        <button class="metric" hx-get="/dashboard?status=PENDING" hx-target="#dashboard-content" hx-swap="outerHTML">
-            <strong>{{.Counts.Pending}}</strong><span>Pendentes</span>
-        </button>
-        <button class="metric success" hx-get="/dashboard?status=COMPLETED" hx-target="#dashboard-content" hx-swap="outerHTML">
-            <strong>{{.Counts.Completed}}</strong><span>Finalizadas</span>
-        </button>
-    </section>
+<div id="dashboard-content">
+    {{template "dashboard-metrics.html" .}}
 
     <form id="dashboard-filters" class="filter-bar no-print"
-        hx-get="/dashboard" hx-target="#dashboard-content" hx-swap="outerHTML"
-        hx-trigger="input changed delay:300ms, change">
+        hx-get="/dashboard/results" hx-target="#dashboard-results" hx-swap="outerHTML"
+        hx-trigger="input, search, change">
         <label class="field grow">
             <span>Busca</span>
             <input type="search" name="q" value="{{.Filters.Query}}" placeholder="Cliente, descrição ou encaminhamento" autocomplete="off">
@@ -57,6 +38,6 @@
         <a class="button ghost align-end" href="/">Limpar</a>
     </form>
 
-    {{template "followup-table.html" .}}
+    {{template "dashboard-results.html" .}}
 </div>
 {{end}}

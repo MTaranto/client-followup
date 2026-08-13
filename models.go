@@ -16,6 +16,9 @@ const (
 	StatusPending   = "PENDING"
 	StatusCompleted = "COMPLETED"
 	StatusArchived  = "ARCHIVED"
+
+	PhoneChangeUpdate    = "update"
+	PhoneChangeNewClient = "new_client"
 )
 
 type Client struct {
@@ -107,6 +110,12 @@ type DashboardView struct {
 
 type FollowUpFormView struct {
 	Today string
+}
+
+type ClientPhoneConfirmationView struct {
+	Name           string
+	CurrentPhone   string
+	SubmittedPhone string
 }
 
 type ClientDetailView struct {
