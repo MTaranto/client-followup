@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,11 @@ type Application struct {
 	templates *template.Template
 	location  *time.Location
 	now       func() time.Time
+}
+
+type clientSuggestion struct {
+	Client
+	ShowID bool
 }
 
 func newApplication(store *Store, location *time.Location) (*Application, error) {
@@ -226,7 +232,23 @@ func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, "Não foi possível pesquisar clientes.", http.StatusInternalServerError)
 		return
 	}
-	app.render(w, http.StatusOK, "client-suggestions.html", clients)
+	app.render(w, http.StatusOK, "client-suggestions.html", clientSuggestions(clients))
+}
+
+func clientSuggestions(clients []Client) []clientSuggestion {
+	nameCounts := make(map[string]int, len(clients))
+	for _, client := range clients {
+		nameCounts[strings.ToLower(client.Name)]++
+	}
+
+	suggestions := make([]clientSuggestion, 0, len(clients))
+	for _, client := range clients {
+		suggestions = append(suggestions, clientSuggestion{
+			Client: client,
+			ShowID: client.Contact == "" && nameCounts[strings.ToLower(client.Name)] > 1,
+		})
+	}
+	return suggestions
 }
 
 func (app *Application) clientDetail(w http.ResponseWriter, r *http.Request) {

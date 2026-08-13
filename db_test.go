@@ -61,6 +61,58 @@ func TestDatabaseCreationAndPersistence(t *testing.T) {
 	}
 }
 
+func TestCreateFollowUpPreservesHomonymousClientIdentity(t *testing.T) {
+	store, _, _ := newTestStore(t)
+
+	firstFollowUpID, err := store.createFollowUp(
+		0, "Ana Silva", "ana.primeira@example.com", "2026-08-12", "2026-08-13",
+		"Pendência da primeira Ana", "", PriorityMedium, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstClientID := followUpClientID(t, store.db, firstFollowUpID)
+
+	secondFollowUpID, err := store.createFollowUp(
+		0, "Ana Silva", "ana.segunda@example.com", "2026-08-12", "2026-08-14",
+		"Pendência da segunda Ana", "", PriorityMedium, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondClientID := followUpClientID(t, store.db, secondFollowUpID)
+	if firstClientID == secondClientID {
+		t.Fatalf("homonymous clients share ID %d; want distinct IDs", firstClientID)
+	}
+
+	firstClient, err := store.getClient(firstClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstClient.Contact != "ana.primeira@example.com" {
+		t.Fatalf("first client contact = %q, want original contact", firstClient.Contact)
+	}
+
+	reusedFollowUpID, err := store.createFollowUp(
+		firstClientID, "Ana Silva", firstClient.Contact, "2026-08-12", "2026-08-15",
+		"Nova pendência da primeira Ana", "", PriorityHigh, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := followUpClientID(t, store.db, reusedFollowUpID); got != firstClientID {
+		t.Fatalf("explicitly selected client ID = %d, want %d", got, firstClientID)
+	}
+
+	var clientCount int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM clients WHERE name = ?", "Ana Silva").Scan(&clientCount); err != nil {
+		t.Fatal(err)
+	}
+	if clientCount != 2 {
+		t.Fatalf("homonymous client count = %d, want 2", clientCount)
+	}
+}
+
 func TestFollowUpStateTransitionsAndTimestamps(t *testing.T) {
 	store, _, fixedNow := newTestStore(t)
 	client, err := store.createClient("Cliente", "")
@@ -175,4 +227,13 @@ func followUpState(t *testing.T, database *sql.DB, id int64) (string, sql.NullTi
 		t.Fatal(err)
 	}
 	return status, completedAt, archivedAt
+}
+
+func followUpClientID(t *testing.T, database *sql.DB, followUpID int64) int64 {
+	t.Helper()
+	var clientID int64
+	if err := database.QueryRow("SELECT client_id FROM followups WHERE id = ?", followUpID).Scan(&clientID); err != nil {
+		t.Fatal(err)
+	}
+	return clientID
 }
