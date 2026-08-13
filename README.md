@@ -5,10 +5,11 @@ Aplicação local para controle das pendências de clientes da Roberta. O MVP us
 ## O que está implementado
 
 - cadastro de cliente no mesmo fluxo da nova pendência;
-- busca incremental de clientes no painel e autofill exato no cadastro de pendência;
+- busca de clientes sem distinção de acentos/maiúsculas no painel e resolução exata de identidade no cadastro de pendência;
 - datas de início e limite, prioridade, descrição, encaminhamento e observação;
 - painel com indicadores, busca de clientes e tabela operacional de pendências;
-- ficha da cliente com edição de nome/telefone e pendências não arquivadas;
+- ficha da cliente inicialmente somente leitura, com edição explícita de nome/telefone e pendências não arquivadas;
+- edição e exclusão explícita somente de pendências abertas;
 - fluxo `PENDING → COMPLETED → PENDING` e `COMPLETED → ARCHIVED`;
 - alertas únicos para atrasadas, vencimento hoje e amanhã, com acesso e destaque da pendência;
 - consulta histórica por período, cliente, encaminhamento, prioridade, status e atraso;
@@ -17,7 +18,7 @@ Aplicação local para controle das pendências de clientes da Roberta. O MVP us
 - endpoint `GET /health`, serviço `systemd --user` e abertura do navegador no login;
 - HTMX 2.0.8 armazenado em `static/vendor`, sem dependência de internet em execução.
 
-Arquivadas não aparecem no painel ou na ficha operacional. Elas permanecem no banco e podem ser consultadas nos relatórios. Não existe exclusão física no fluxo normal.
+Arquivadas não aparecem no painel ou na ficha operacional. Elas permanecem no banco e podem ser consultadas nos relatórios. A exclusão física existe somente para uma pendência aberta e confirmada; a cliente também é excluída na mesma transação apenas quando não resta nenhum outro registro em qualquer status.
 
 ## Mapa do código
 
@@ -62,7 +63,7 @@ go vet ./...
 go test -race ./...
 ```
 
-Os testes usam bancos temporários e cobrem lembretes, ordenação, criação do schema, cadastro, busca parcial, transições/timestamps, persistência após reabertura, backup/restauração, retenção e escaping de conteúdo digitado.
+Os testes usam bancos temporários e cobrem lembretes, ordenação, criação do schema, cadastro, busca parcial normalizada, resolução de homônimas, validação de nomes e telefones, edição e exclusão restritas por status, preservação do histórico, transições/timestamps, persistência após reabertura, backup/restauração, retenção e escaping de conteúdo digitado.
 
 O workflow `.github/workflows/ci.yml` repete formatação, testes, `go vet` e detector de corrida no GitHub Actions quando o repositório for publicado.
 
@@ -116,6 +117,6 @@ Esta primeira passagem não inclui sincronização, múltiplos usuários, login,
 - **Escopo:** somente os itens e critérios de aceite do `ARCHITECTURE.md`.
 - **Risco:** moderado por persistência e dados pessoais não sensíveis.
 - **Dependência externa:** apenas `github.com/mattn/go-sqlite3`; HTMX é um arquivo estático local.
-- **Efeitos:** gravação do banco, backups diários e atualização de estado sem exclusão física.
+- **Efeitos:** gravação do banco, backups diários, atualização de estado e exclusão transacional restrita a pendências abertas explicitamente confirmadas.
 - **Reversão:** desinstalador preserva dados; restauração documentada acima; alterações de código podem ser revertidas pelo Git após um commit aprovado.
 - **Implementação:** assistida por Codex; testes automatizados e ferramentas Go fornecem evidência independente, mas não equivalem a revisão humana.

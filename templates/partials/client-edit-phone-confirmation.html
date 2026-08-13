@@ -1,0 +1,15 @@
+{{define "client-edit-phone-confirmation.html"}}
+<div class="phone-confirmation" role="alert">
+    <p><strong>Confirmar alteração de telefone?</strong></p>
+    <p>Você está alterando o telefone cadastrado de {{.Name}}:</p>
+    <p>De:</p><p class="phone-comparison">{{.CurrentPhone}}</p>
+    <p>Para:</p><p class="phone-comparison">{{.SubmittedPhone}}</p>
+    <p>O novo número passará a ser usado nos próximos registros desta cliente.</p>
+    <div class="phone-confirmation-actions">
+        <button type="submit" class="button primary" data-confirm-client-phone-change>
+            Confirmar alteração
+        </button>
+        <button type="button" class="button ghost" data-cancel-client-phone-change>Cancelar</button>
+    </div>
+</div>
+{{end}}

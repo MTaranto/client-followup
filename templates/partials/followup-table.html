@@ -15,7 +15,7 @@
             </thead>
             <tbody>
                 {{range .FollowUps}}
-                <tr class="{{if eq .Alert.Kind "OVERDUE"}}overdue-row{{end}}">
+                <tr class="{{if eq .Alert.Kind "OVERDUE"}}overdue-row{{else if eq .Alert.Kind "TODAY"}}today-row{{else if eq .Alert.Kind "TOMORROW"}}tomorrow-row{{end}}">
                     <td>
                         <button class="link-button" type="button" hx-get="/clients/{{.ClientID}}" hx-target="#modal-container" hx-swap="innerHTML">{{.ClientName}}</button>
                     </td>
@@ -40,11 +40,17 @@
 
 {{define "followup-actions.html"}}
 {{if eq .Status "PENDING"}}
+<button class="button compact secondary" type="button" hx-get="/followups/{{.ID}}/edit"
+    hx-target="#modal-container" hx-swap="innerHTML">Editar</button>
 <label class="completion-check">
     <input type="checkbox" aria-label="Marcar pendência como realizada"
         hx-post="/followups/{{.ID}}/complete" hx-trigger="change" hx-target="#flash" hx-swap="innerHTML">
     <span>Realizado</span>
 </label>
+<form hx-post="/followups/{{.ID}}/delete" hx-target="#flash" hx-swap="innerHTML"
+    hx-confirm="Excluir esta pendência? Essa ação remove definitivamente este registro.">
+    <button class="button compact danger-button" type="submit">Excluir</button>
+</form>
 {{else if eq .Status "COMPLETED"}}
 <form hx-post="/followups/{{.ID}}/reopen" hx-target="#flash" hx-swap="innerHTML">
     <button class="button compact secondary" type="submit">Reabrir</button>

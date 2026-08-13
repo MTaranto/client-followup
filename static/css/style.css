@@ -68,17 +68,20 @@ h1 { font-size: clamp(1.75rem, 3vw, 2.4rem); }
 .button.primary:hover { background: var(--primary-dark); }
 .button.secondary { border-color: var(--primary); color: var(--primary); }
 .button.success { background: var(--success); color: white; }
+.button.danger-button { border-color: #cf8c84; background: #fff3f1; color: #8c3030; }
 .button.ghost { border-color: var(--line); background: transparent; }
 .button.compact { min-height: 32px; padding: 5px 9px; font-size: .8rem; }
 .align-end { align-self: end; }
 
 .metrics { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.metric { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; box-shadow: 0 3px 12px rgba(32, 52, 57, .04); }
+.metric { padding: 16px; border: 1px solid #c8d8e7; border-radius: 10px; background: #eaf3fa; color: #365d88; text-align: left; box-shadow: 0 3px 12px rgba(32, 52, 57, .04); }
 .metric strong { display: block; font-size: 1.75rem; }
-.metric span { color: var(--muted); }
-.metric.danger strong { color: var(--danger); }
-.metric.warning strong, .metric.attention strong { color: var(--warning); }
-.metric.success strong { color: var(--success); }
+.metric span { color: inherit; }
+.metric.danger { border-color: #e8b9b3; background: #f9e6e3; color: #923b36; }
+.metric.warning { border-color: #e8c681; background: #fff0cf; color: #8a570d; }
+.metric.attention { border-color: #e5d39c; background: #fff7dc; color: #80651c; }
+.metric.pending { border-color: #bfd3e6; background: #e5f0f8; color: #365d88; }
+.metric.success { border-color: #bddac7; background: #e4f2e9; color: #2f6746; }
 
 .filter-bar, .report-filters, .client-edit {
     display: flex;
@@ -108,6 +111,7 @@ table { width: 100%; border-collapse: collapse; text-align: left; }
 th, td { padding: 12px 14px; border-bottom: 1px solid #edf1f2; vertical-align: top; }
 th { position: sticky; top: 0; z-index: 1; background: #eef4f2; color: #536168; font-size: .75rem; letter-spacing: .035em; text-transform: uppercase; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { box-shadow: inset 4px 0 rgba(50, 107, 99, .42); }
 .description-cell { display: block; min-width: 220px; max-width: 420px; }
 .link-button { border: 0; padding: 0; background: none; color: var(--primary); font-weight: 750; text-align: left; text-decoration: underline; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -115,7 +119,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .completion-check { display: inline-flex; align-items: center; gap: 6px; color: var(--success); font-size: .82rem; font-weight: 800; white-space: nowrap; cursor: pointer; }
 .completion-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--success); }
 .empty-state { padding: 36px; text-align: center; color: var(--muted); }
-.overdue-row { background: #fff9f8; }
+.overdue-row { background: #fbe9e6; }
+.today-row { background: #fff1d3; }
+.tomorrow-row { background: #fff8e4; }
 
 .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: .75rem; font-weight: 800; white-space: nowrap; }
 .priority-HIGH { background: #fbe6e4; color: #8c3030; }
@@ -137,6 +143,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .full-width { grid-column: 1 / -1; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+.followup-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.followup-fields:disabled { opacity: .58; }
 .client-search-results { display: grid; gap: 6px; margin: -8px 0 18px; }
 .client-search-result { display: flex; justify-content: space-between; gap: 16px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); text-align: left; }
 .client-search-result:hover { border-color: var(--primary); background: #eef5f3; }
@@ -151,11 +159,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .phone-comparison { color: var(--warning); font-size: 1.05rem; font-weight: 800; }
 .phone-confirmation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .flash-region { position: fixed; right: 20px; bottom: 20px; z-index: 1100; max-width: 380px; }
-.client-edit { display: grid; grid-template-columns: 1fr 1fr auto; }
+.client-summary { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; padding: 16px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; }
+.client-summary div, .read-only-field { display: flex; flex-direction: column; gap: 4px; }
+.client-summary span, .read-only-field span { color: var(--muted); font-size: .78rem; font-weight: 750; }
+.client-edit { display: grid; grid-template-columns: 1fr 1fr; }
+.client-edit-actions { display: flex; gap: 8px; align-items: end; }
 .client-followups { max-height: 56vh; border: 1px solid var(--line); border-radius: 8px; }
 .notes { display: block; margin-top: 5px; color: var(--muted); white-space: pre-wrap; }
 .highlighted { animation: highlight 2.4s ease-out; }
-@keyframes highlight { from { background: #ffe8a3; box-shadow: inset 4px 0 #d89413; } to { background: transparent; box-shadow: none; } }
+@keyframes highlight { from { box-shadow: inset 6px 0 #d89413; } to { box-shadow: inset 0 0 transparent; } }
 
 .reminder-modal { width: min(820px, 96vw); }
 .reminder-list { display: grid; gap: 9px; }
@@ -178,7 +190,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .site-header, .page-heading { align-items: stretch; flex-direction: column; }
     .site-header { padding: 14px 5vw; }
     .page-shell { padding-top: 22px; }
-    .metrics, .report-filters, .form-grid, .client-edit { grid-template-columns: 1fr; }
+    .metrics, .report-filters, .form-grid, .followup-fields, .client-edit, .client-summary { grid-template-columns: 1fr; }
     .full-width { grid-column: auto; }
     .filter-bar { align-items: stretch; flex-direction: column; }
     .field { width: 100%; }

@@ -9,11 +9,13 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var errInvalidTransition = errors.New("transição de status inválida")
+var errClientResolutionRequired = errors.New("escolha uma cliente existente ou confirme o cadastro de uma nova cliente com este nome")
 
 var (
 	digitsOnlyPhonePattern = regexp.MustCompile(`^[0-9]{11}$`)
@@ -23,6 +25,15 @@ var (
 type clientPhoneChangeRequiredError struct {
 	Client         Client
 	SubmittedPhone string
+}
+
+type clientEditPhoneChangeRequiredError struct {
+	Client         Client
+	SubmittedPhone string
+}
+
+func (err *clientEditPhoneChangeRequiredError) Error() string {
+	return "confirme a alteração do telefone da cliente"
 }
 
 func (err *clientPhoneChangeRequiredError) Error() string {
@@ -117,11 +128,11 @@ func (store *Store) migrate() error {
 }
 
 func (store *Store) createClient(name, contact string) (Client, error) {
-	name = normalizeText(name)
-	if name == "" {
-		return Client{}, errors.New("o nome da cliente é obrigatório")
+	name, err := validateClientName(name)
+	if err != nil {
+		return Client{}, err
 	}
-	contact, err := normalizePhone(contact)
+	contact, err = normalizePhone(contact)
 	if err != nil {
 		return Client{}, err
 	}
@@ -141,10 +152,10 @@ func (store *Store) createClient(name, contact string) (Client, error) {
 	return Client{ID: id, Name: name, Contact: contact, CreatedAt: now, UpdatedAt: now}, nil
 }
 
-func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name, contact, phoneChangeAction string) (int64, error) {
-	name = normalizeText(name)
-	if name == "" {
-		return 0, errors.New("o nome da cliente é obrigatório")
+func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name, contact, phoneChangeAction, clientResolution string) (int64, error) {
+	name, err := validateClientName(name)
+	if err != nil {
+		return 0, err
 	}
 
 	if clientID > 0 {
@@ -157,7 +168,7 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 			}
 			return 0, fmt.Errorf("consultar cliente: %w", err)
 		}
-		if !strings.EqualFold(normalizeText(existing.Name), name) {
+		if normalizeClientName(existing.Name) != normalizeClientName(name) {
 			return 0, errors.New("o nome não corresponde à cliente selecionada; selecione novamente")
 		}
 
@@ -179,6 +190,19 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 		}
 	}
 
+	matches, err := findClientsByExactNameQuery(transaction, name, 2)
+	if err != nil {
+		return 0, fmt.Errorf("consultar clientes homônimas: %w", err)
+	}
+	// A missing client ID is ambiguous when the normalized name already exists.
+	// Requiring the explicit homonym choice prevents forged requests from silently
+	// creating another record after the browser presented existing identities.
+	if len(matches) > 0 && clientResolution != ClientResolutionNewHomonym {
+		return 0, errClientResolutionRequired
+	}
+	if clientResolution == ClientResolutionNewHomonym && len(matches) == 0 {
+		return 0, errors.New("não há clientes homônimas para esta decisão")
+	}
 	return insertClient(transaction, name, contact, store.now())
 }
 
@@ -193,7 +217,7 @@ func insertClient(transaction *sql.Tx, name, contact string, now time.Time) (int
 	return result.LastInsertId()
 }
 
-func (store *Store) createFollowUp(clientID int64, clientName, contact, startDate, dueDate, description, forwardTo, priority, notes, phoneChangeAction string) (int64, error) {
+func (store *Store) createFollowUp(clientID int64, clientName, contact, startDate, dueDate, description, forwardTo, priority, notes, phoneChangeAction, clientResolution string) (int64, error) {
 	contact, err := normalizePhone(contact)
 	if err != nil {
 		return 0, err
@@ -218,7 +242,7 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 	}
 	defer transaction.Rollback()
 
-	resolvedClientID, err := store.findOrCreateClient(transaction, clientID, clientName, contact, phoneChangeAction)
+	resolvedClientID, err := store.findOrCreateClient(transaction, clientID, clientName, contact, phoneChangeAction, clientResolution)
 	if err != nil {
 		return 0, err
 	}
@@ -241,14 +265,25 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 	return id, nil
 }
 
-func (store *Store) updateClient(id int64, name, contact string) error {
-	name = normalizeText(name)
-	if name == "" {
-		return errors.New("o nome da cliente é obrigatório")
-	}
-	contact, err := normalizePhone(contact)
+func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmation string) error {
+	name, err := validateClientName(name)
 	if err != nil {
 		return err
+	}
+	contact, err = normalizePhone(contact)
+	if err != nil {
+		return err
+	}
+	existing, err := store.getClient(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("cliente não encontrada")
+		}
+		return fmt.Errorf("consultar cliente: %w", err)
+	}
+	currentPhone, currentPhoneErr := normalizePhone(existing.Contact)
+	if (currentPhoneErr != nil || currentPhone != contact) && phoneChangeConfirmation != ClientPhoneChangeConfirmation {
+		return &clientEditPhoneChangeRequiredError{Client: existing, SubmittedPhone: contact}
 	}
 	result, err := store.db.Exec("UPDATE clients SET name = ?, contact = ?, updated_at = ? WHERE id = ?", name, contact, store.now(), id)
 	if err != nil {
@@ -293,6 +328,89 @@ func (store *Store) transitionFollowUp(id int64, fromStatus, toStatus string) er
 	return nil
 }
 
+func (store *Store) getFollowUp(id int64) (FollowUp, error) {
+	var item FollowUp
+	err := store.db.QueryRow(`SELECT `+followUpColumns+` FROM followups f JOIN clients c ON c.id = f.client_id WHERE f.id = ?`, id).Scan(
+		&item.ID, &item.ClientID, &item.ClientName, &item.StartDate, &item.DueDate,
+		&item.Description, &item.ForwardTo, &item.Priority, &item.Status, &item.Notes,
+		&item.CompletedAt, &item.ArchivedAt, &item.CreatedAt, &item.UpdatedAt,
+	)
+	return item, err
+}
+
+func (store *Store) updatePendingFollowUp(id int64, startDate, dueDate, description, forwardTo, priority, notes string) error {
+	if _, err := time.Parse("2006-01-02", startDate); err != nil {
+		return errors.New("a data de início é inválida")
+	}
+	if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+		return errors.New("a data limite é obrigatória e deve ser válida")
+	}
+	description = normalizeText(description)
+	if description == "" {
+		return errors.New("a descrição é obrigatória")
+	}
+	if !validPriority(priority) {
+		return errors.New("a prioridade é inválida")
+	}
+
+	// Keeping the current status in the write predicate closes the race between
+	// opening the editor and another request completing or archiving the item.
+	result, err := store.db.Exec(`UPDATE followups SET start_date = ?, due_date = ?, description = ?,
+		forward_to = ?, priority = ?, notes = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		startDate, dueDate, description, normalizeText(forwardTo), priority, normalizeText(notes), store.now(), id, StatusPending)
+	if err != nil {
+		return fmt.Errorf("atualizar pendência: %w", err)
+	}
+	if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+		return errInvalidTransition
+	}
+	return nil
+}
+
+func (store *Store) deletePendingFollowUp(id int64) (bool, error) {
+	transaction, err := store.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("iniciar exclusão: %w", err)
+	}
+	defer transaction.Rollback()
+
+	var clientID int64
+	var status string
+	if err := transaction.QueryRow("SELECT client_id, status FROM followups WHERE id = ?", id).Scan(&clientID, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, errors.New("pendência não encontrada")
+		}
+		return false, fmt.Errorf("consultar pendência: %w", err)
+	}
+	if status != StatusPending {
+		return false, errInvalidTransition
+	}
+	result, err := transaction.Exec("DELETE FROM followups WHERE id = ? AND status = ?", id, StatusPending)
+	if err != nil {
+		return false, fmt.Errorf("excluir pendência: %w", err)
+	}
+	if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+		return false, errInvalidTransition
+	}
+
+	var remaining int
+	if err := transaction.QueryRow("SELECT COUNT(*) FROM followups WHERE client_id = ?", clientID).Scan(&remaining); err != nil {
+		return false, fmt.Errorf("verificar histórico da cliente: %w", err)
+	}
+	clientDeleted := remaining == 0
+	if clientDeleted {
+		// The orphan check and both deletions share this transaction so a failure
+		// cannot leave a client without its only follow-up or delete one with history.
+		if _, err := transaction.Exec("DELETE FROM clients WHERE id = ?", clientID); err != nil {
+			return false, fmt.Errorf("excluir cliente sem pendências: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return false, fmt.Errorf("confirmar exclusão: %w", err)
+	}
+	return clientDeleted, nil
+}
+
 func requireChangedRow(result sql.Result, message string) error {
 	rows, err := result.RowsAffected()
 	if err != nil {
@@ -315,9 +433,11 @@ func (store *Store) getClient(id int64) (Client, error) {
 }
 
 func (store *Store) searchClients(query string) ([]Client, error) {
-	term := "%" + normalizeText(query) + "%"
-	rows, err := store.db.Query(`SELECT id, name, contact, created_at, updated_at FROM clients
-		WHERE name LIKE ? COLLATE NOCASE ORDER BY name, id LIMIT 8`, term)
+	query = normalizeClientName(query)
+	if query == "" {
+		return []Client{}, nil
+	}
+	rows, err := store.db.Query(`SELECT id, name, contact, created_at, updated_at FROM clients ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -329,19 +449,30 @@ func (store *Store) searchClients(query string) ([]Client, error) {
 		if err := rows.Scan(&client.ID, &client.Name, &client.Contact, &client.CreatedAt, &client.UpdatedAt); err != nil {
 			return nil, err
 		}
-		clients = append(clients, client)
+		if strings.Contains(normalizeClientName(client.Name), query) {
+			clients = append(clients, client)
+			if len(clients) == 8 {
+				break
+			}
+		}
 	}
 	return clients, rows.Err()
 }
 
 func (store *Store) findClientsByExactName(name string) ([]Client, error) {
-	name = normalizeText(name)
+	return findClientsByExactNameQuery(store.db, name, 8)
+}
+
+type clientQueryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func findClientsByExactNameQuery(queryer clientQueryer, name string, limit int) ([]Client, error) {
+	name = normalizeClientName(name)
 	if name == "" {
 		return []Client{}, nil
 	}
-
-	rows, err := store.db.Query(`SELECT id, name, contact, created_at, updated_at FROM clients
-		WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 8`, name)
+	rows, err := queryer.Query(`SELECT id, name, contact, created_at, updated_at FROM clients ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -353,9 +484,56 @@ func (store *Store) findClientsByExactName(name string) ([]Client, error) {
 		if err := rows.Scan(&client.ID, &client.Name, &client.Contact, &client.CreatedAt, &client.UpdatedAt); err != nil {
 			return nil, err
 		}
-		clients = append(clients, client)
+		if normalizeClientName(client.Name) == name {
+			clients = append(clients, client)
+			if len(clients) == limit {
+				break
+			}
+		}
 	}
 	return clients, rows.Err()
+}
+
+func normalizeClientName(value string) string {
+	// SQLite NOCASE only handles ASCII. Folding the Portuguese characters in Go
+	// keeps the original stored text untouched and avoids a schema or dependency
+	// solely for the small local client dataset.
+	var normalized strings.Builder
+	for _, character := range strings.ToLower(normalizeText(value)) {
+		switch character {
+		case 'á', 'à', 'â', 'ã', 'ä':
+			character = 'a'
+		case 'é', 'è', 'ê', 'ë':
+			character = 'e'
+		case 'í', 'ì', 'î', 'ï':
+			character = 'i'
+		case 'ó', 'ò', 'ô', 'õ', 'ö':
+			character = 'o'
+		case 'ú', 'ù', 'û', 'ü':
+			character = 'u'
+		case 'ç':
+			character = 'c'
+		case 'ñ':
+			character = 'n'
+		}
+		if !unicode.Is(unicode.Mn, character) {
+			normalized.WriteRune(character)
+		}
+	}
+	return normalized.String()
+}
+
+func validateClientName(value string) (string, error) {
+	value = normalizeText(value)
+	if value == "" {
+		return "", errors.New("o nome da cliente é obrigatório")
+	}
+	for _, character := range value {
+		if unicode.IsDigit(character) {
+			return "", errors.New("o nome da cliente não pode conter números")
+		}
+	}
+	return value, nil
 }
 
 func normalizePhone(value string) (string, error) {

@@ -1,0 +1,34 @@
+{{define "followup-edit.html"}}
+<div class="modal-overlay" role="presentation">
+    <section class="modal-content wide" role="dialog" aria-modal="true" aria-labelledby="followup-edit-title">
+        <header class="modal-header">
+            <div><p class="eyebrow">Correção de lançamento</p><h2 id="followup-edit-title">Editar pendência</h2></div>
+            <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
+        </header>
+        <form class="form-grid" hx-post="/followups/{{.FollowUp.ID}}/edit"
+            hx-target="#followup-edit-message" hx-swap="innerHTML">
+            <div class="read-only-field full-width"><span>Cliente</span><strong>{{.FollowUp.ClientName}}</strong></div>
+            <label class="field"><span>Data de início *</span>
+                <input type="date" name="start_date" value="{{.FollowUp.StartDate}}" required></label>
+            <label class="field"><span>Data limite *</span>
+                <input type="date" name="due_date" value="{{.FollowUp.DueDate}}" required></label>
+            <label class="field"><span>Prioridade *</span><select name="priority" required>
+                <option value="HIGH" {{if eq .FollowUp.Priority "HIGH"}}selected{{end}}>Alta</option>
+                <option value="MEDIUM" {{if eq .FollowUp.Priority "MEDIUM"}}selected{{end}}>Média</option>
+                <option value="LOW" {{if eq .FollowUp.Priority "LOW"}}selected{{end}}>Baixa</option>
+            </select></label>
+            <label class="field full-width"><span>Descrição *</span>
+                <textarea name="description" rows="3" required>{{.FollowUp.Description}}</textarea></label>
+            <label class="field full-width"><span>Encaminhar para</span>
+                <input name="forward_to" value="{{.FollowUp.ForwardTo}}" autocomplete="off"></label>
+            <label class="field full-width"><span>Observação</span>
+                <textarea name="notes" rows="3">{{.FollowUp.Notes}}</textarea></label>
+            <div id="followup-edit-message" class="full-width" aria-live="polite"></div>
+            <footer class="form-actions full-width">
+                <button type="button" class="button ghost modal-close">Cancelar</button>
+                <button type="submit" class="button primary">Salvar alterações</button>
+            </footer>
+        </form>
+    </section>
+</div>
+{{end}}

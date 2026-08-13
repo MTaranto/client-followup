@@ -25,6 +25,11 @@
         modal.dataset.prepared = "true";
 
         modal.querySelectorAll("[data-phone-input]").forEach(formatPhoneInput);
+        const followUpForm = modal.querySelector("#followup-form");
+        const followUpFields = followUpForm && followUpForm.querySelector("#followup-fields");
+        if (followUpFields) {
+            setFollowUpFieldsLocked(followUpForm, followUpFields.disabled);
+        }
         const autofocus = modal.querySelector("[autofocus]");
         if (autofocus) {
             autofocus.focus();
@@ -36,7 +41,37 @@
     }
 
     function normalizeName(value) {
-        return value.trim().toLocaleLowerCase("pt-BR");
+        return value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/\p{M}/gu, "");
+    }
+
+    function removeNameDigits(input) {
+        const sanitized = input.value.replace(/\p{N}/gu, "");
+        if (sanitized !== input.value) {
+            input.value = sanitized;
+        }
+    }
+
+    function setFollowUpFieldsLocked(form, locked) {
+        const fields = form && form.querySelector("#followup-fields");
+        const saveButton = form && form.querySelector("#followup-save");
+        if (fields) {
+            fields.disabled = locked;
+        }
+        if (saveButton) {
+            saveButton.disabled = locked;
+        }
+        if (form) {
+            // The disabled fieldset is the authoritative UI gate: client identity
+            // must be resolved before any dependent value can be edited or sent.
+            form.dataset.clientResolved = locked ? "false" : "true";
+        }
+    }
+
+    function setClientResolution(form, value) {
+        const resolutionInput = form && form.querySelector("#client-resolution");
+        if (resolutionInput) {
+            resolutionInput.value = value;
+        }
     }
 
     function clearClientMatches(form) {
@@ -116,6 +151,8 @@
         delete nameInput.dataset.selectedClientName;
         delete contactInput.dataset.autofilledContact;
         clearPhoneDecision(form);
+        setClientResolution(form, "");
+        setFollowUpFieldsLocked(form, true);
     }
 
     function selectClient(form, client, preserveManualContact) {
@@ -138,6 +175,8 @@
         }
         clearClientMatches(form);
         clearPhoneDecision(form);
+        setClientResolution(form, "existing");
+        setFollowUpFieldsLocked(form, false);
     }
 
     function chooseNewHomonymousClient(form) {
@@ -156,6 +195,8 @@
         delete contactInput.dataset.autofilledContact;
         clearClientMatches(form);
         clearPhoneDecision(form);
+        setClientResolution(form, "new_homonym");
+        setFollowUpFieldsLocked(form, false);
         contactInput.focus();
     }
 
@@ -190,7 +231,7 @@
         container.replaceChildren(panel);
     }
 
-    function verifyExactClient(nameInput) {
+    function verifyExactClient(nameInput, focusNext) {
         const form = nameInput.closest("form");
         if (!form || form.id !== "followup-form") {
             return;
@@ -198,11 +239,28 @@
         clearClientMatches(form);
         const requestedName = nameInput.value.trim();
         if (!requestedName) {
+            setClientResolution(form, "");
+            setFollowUpFieldsLocked(form, true);
+            return;
+        }
+        const idInput = form.querySelector("#client-id");
+        if (idInput && idInput.value &&
+                normalizeName(nameInput.dataset.selectedClientName || "") === normalizeName(requestedName)) {
+            setClientResolution(form, "existing");
+            setFollowUpFieldsLocked(form, false);
+            if (focusNext) {
+                form.querySelector("#client-contact").focus();
+            }
             return;
         }
 
         const contactInput = form.querySelector("#client-contact");
         const contactAtRequest = contactInput ? contactInput.value : "";
+        setClientResolution(form, "");
+        setFollowUpFieldsLocked(form, true);
+        nameInput.setAttribute("aria-busy", "true");
+        // Only the newest lookup may unlock the form. This prevents a slow response
+        // for an older name from bypassing the structural identity gate.
         const requestSequence = ++exactLookupSequence;
         fetch("/clients/exact?client_name=" + encodeURIComponent(requestedName), {
             headers: { "Accept": "application/json" }
@@ -220,15 +278,37 @@
             if (clients.length === 1) {
                 const contactWasEdited = contactInput && contactInput.value !== contactAtRequest;
                 selectClient(form, clients[0], contactWasEdited);
+                if (focusNext) {
+                    contactInput.focus();
+                }
             } else if (clients.length > 1) {
                 renderClientMatches(form, clients);
+                if (focusNext) {
+                    const firstChoice = form.querySelector(".client-match-option");
+                    if (firstChoice) {
+                        firstChoice.focus();
+                    }
+                }
+            } else {
+                setClientResolution(form, "new");
+                setFollowUpFieldsLocked(form, false);
+                if (focusNext) {
+                    contactInput.focus();
+                }
             }
+            nameInput.removeAttribute("aria-busy");
         }).catch(function () {
+            if (requestSequence !== exactLookupSequence || !form.isConnected ||
+                    normalizeName(nameInput.value) !== normalizeName(requestedName)) {
+                return;
+            }
+            nameInput.removeAttribute("aria-busy");
+            setFollowUpFieldsLocked(form, true);
             const message = form.querySelector("#followup-form-message");
-            if (message && requestSequence === exactLookupSequence) {
+            if (message) {
                 const error = document.createElement("div");
                 error.className = "message error";
-                error.textContent = "Não foi possível verificar a cliente agora. Você ainda pode preencher e salvar normalmente.";
+                error.textContent = "Não foi possível verificar a cliente agora. Tente novamente antes de continuar.";
                 message.replaceChildren(error);
             }
         });
@@ -237,6 +317,14 @@
     document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") {
             closeModal();
+            return;
+        }
+        if (event.key === "Tab" && event.target.id === "client-name") {
+            const form = event.target.closest("#followup-form");
+            if (form && form.dataset.clientResolved !== "true") {
+                event.preventDefault();
+                verifyExactClient(event.target, true);
+            }
         }
     });
 
@@ -277,18 +365,58 @@
             return;
         }
 
+        const cancelClientPhoneChange = event.target.closest("[data-cancel-client-phone-change]");
+        if (cancelClientPhoneChange) {
+            const form = cancelClientPhoneChange.closest("form");
+            const phoneInput = form && form.querySelector("[name=contact]");
+            const confirmationInput = form && form.querySelector("#client-phone-change-confirmation");
+            if (phoneInput) {
+                phoneInput.value = phoneInput.dataset.originalPhone || phoneInput.value;
+            }
+            if (confirmationInput) {
+                confirmationInput.value = "";
+            }
+            cancelClientPhoneChange.closest(".phone-confirmation").remove();
+            return;
+        }
+
+        const confirmClientPhoneChange = event.target.closest("[data-confirm-client-phone-change]");
+        if (confirmClientPhoneChange) {
+            const confirmationInput = confirmClientPhoneChange.closest("form").querySelector("#client-phone-change-confirmation");
+            if (confirmationInput) {
+                confirmationInput.value = "confirm";
+            }
+        }
+
         if (event.target.closest("[data-print]")) {
             window.print();
         }
     });
 
     document.addEventListener("input", function (event) {
+        if (event.target.id === "dashboard-client-search" || event.target.id === "client-name" ||
+                event.target.matches("[data-client-name-input]")) {
+            removeNameDigits(event.target);
+        }
         if (event.target.matches("[data-phone-input]")) {
             formatPhoneInput(event.target);
         }
         if (event.target.id === "client-name") {
             invalidateClientSelection(event.target);
             clearClientMatches(event.target.closest("form"));
+            setClientResolution(event.target.closest("form"), "");
+            setFollowUpFieldsLocked(event.target.closest("form"), true);
+        }
+        if (event.target.matches("#client-edit-region [name=contact]")) {
+            const form = event.target.closest("form");
+            const confirmationInput = form && form.querySelector("#client-phone-change-confirmation");
+            const message = form && form.querySelector("#client-edit-message");
+            if (confirmationInput) {
+                confirmationInput.value = "";
+            }
+            if (message) {
+                message.replaceChildren();
+            }
         }
         if (event.target.id === "client-contact") {
             const form = event.target.closest("form");
@@ -307,15 +435,28 @@
                 delete event.target.dataset.autofilledContact;
             }
         }
-    });
+    }, true);
 
     document.addEventListener("change", function (event) {
         if (event.target.id === "client-name") {
-            verifyExactClient(event.target);
+            const form = event.target.closest("#followup-form");
+            if (form && form.dataset.clientResolved !== "true") {
+                verifyExactClient(event.target, false);
+            }
         }
     });
 
     document.body.addEventListener("closeModal", closeModal);
+    document.body.addEventListener("followupSaved", function () {
+        const searchInput = document.getElementById("dashboard-client-search");
+        const results = document.getElementById("client-search-results");
+        if (searchInput) {
+            searchInput.value = "";
+        }
+        if (results) {
+            results.replaceChildren();
+        }
+    });
     document.body.addEventListener("htmx:afterSwap", prepareModal);
     document.body.addEventListener("htmx:beforeSwap", function (event) {
         const status = event.detail.xhr.status;

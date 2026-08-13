@@ -19,6 +19,12 @@ const (
 
 	PhoneChangeUpdate    = "update"
 	PhoneChangeNewClient = "new_client"
+
+	ClientResolutionNew        = "new"
+	ClientResolutionExisting   = "existing"
+	ClientResolutionNewHomonym = "new_homonym"
+
+	ClientPhoneChangeConfirmation = "confirm"
 )
 
 type Client struct {
@@ -113,9 +119,16 @@ type FollowUpFormView struct {
 	ClientID   int64
 	ClientName string
 	Contact    string
+	Resolved   bool
 }
 
 type ClientPhoneConfirmationView struct {
+	Name           string
+	CurrentPhone   string
+	SubmittedPhone string
+}
+
+type ClientEditPhoneConfirmationView struct {
 	Name           string
 	CurrentPhone   string
 	SubmittedPhone string
@@ -125,6 +138,10 @@ type ClientDetailView struct {
 	Client      Client
 	FollowUps   []FollowUp
 	HighlightID int64
+}
+
+type FollowUpEditView struct {
+	FollowUp FollowUp
 }
 
 type ReportsView struct {

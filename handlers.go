@@ -64,6 +64,9 @@ func (app *Application) routes() http.Handler {
 	mux.HandleFunc("GET /dashboard/metrics", app.dashboardMetrics)
 	mux.HandleFunc("GET /followups/new", app.followUpForm)
 	mux.HandleFunc("POST /followups", app.createFollowUp)
+	mux.HandleFunc("GET /followups/{id}/edit", app.editFollowUpForm)
+	mux.HandleFunc("POST /followups/{id}/edit", app.updateFollowUp)
+	mux.HandleFunc("POST /followups/{id}/delete", app.deleteFollowUp)
 	mux.HandleFunc("POST /followups/{id}/complete", app.completeFollowUp)
 	mux.HandleFunc("POST /followups/{id}/reopen", app.reopenFollowUp)
 	mux.HandleFunc("POST /followups/{id}/archive", app.archiveFollowUp)
@@ -71,6 +74,7 @@ func (app *Application) routes() http.Handler {
 	mux.HandleFunc("GET /clients/exact", app.exactClients)
 	mux.HandleFunc("GET /clients/phone-change-confirmation", app.phoneChangeConfirmation)
 	mux.HandleFunc("GET /clients/{id}", app.clientDetail)
+	mux.HandleFunc("GET /clients/{id}/edit", app.clientEditForm)
 	mux.HandleFunc("POST /clients/{id}", app.updateClient)
 	mux.HandleFunc("GET /reminders", app.reminders)
 	mux.HandleFunc("GET /reports", app.reportsPage)
@@ -203,6 +207,7 @@ func (app *Application) followUpForm(w http.ResponseWriter, r *http.Request) {
 		view.ClientID = client.ID
 		view.ClientName = client.Name
 		view.Contact = client.Contact
+		view.Resolved = true
 	}
 	app.render(w, http.StatusOK, "followup-form.html", view)
 }
@@ -233,6 +238,7 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("priority"),
 		r.FormValue("notes"),
 		r.FormValue("phone_change_action"),
+		r.FormValue("client_resolution"),
 	)
 	if err != nil {
 		var phoneChange *clientPhoneChangeRequiredError
@@ -247,8 +253,82 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"closeModal":true}`)
+	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"followupSaved":true,"closeModal":true}`)
 	app.renderSuccess(w, "Pendência cadastrada com sucesso.")
+}
+
+func (app *Application) editFollowUpForm(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	item, err := app.store.getFollowUp(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		app.renderError(w, "Não foi possível abrir a pendência.", http.StatusInternalServerError)
+		return
+	}
+	if item.Status != StatusPending {
+		app.renderError(w, "Somente pendências abertas podem ser editadas.", http.StatusConflict)
+		return
+	}
+	app.render(w, http.StatusOK, "followup-edit.html", FollowUpEditView{FollowUp: item})
+}
+
+func (app *Application) updateFollowUp(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	err = app.store.updatePendingFollowUp(
+		id,
+		r.FormValue("start_date"),
+		r.FormValue("due_date"),
+		r.FormValue("description"),
+		r.FormValue("forward_to"),
+		r.FormValue("priority"),
+		r.FormValue("notes"),
+	)
+	if errors.Is(err, errInvalidTransition) {
+		app.renderError(w, "Somente pendências abertas podem ser editadas.", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"closeModal":true}`)
+	app.renderSuccess(w, "Pendência atualizada com sucesso.")
+}
+
+func (app *Application) deleteFollowUp(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	clientDeleted, err := app.store.deletePendingFollowUp(id)
+	if errors.Is(err, errInvalidTransition) {
+		app.renderError(w, "Somente pendências abertas podem ser excluídas.", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if clientDeleted {
+		// Close the deleted client's detail before broadcasting the refresh; otherwise
+		// its HTMX listener could refetch a record that no longer exists.
+		w.Header().Set("HX-Trigger", `{"closeModal":true,"followupsChanged":true}`)
+	} else {
+		w.Header().Set("HX-Trigger", `{"followupsChanged":true}`)
+	}
+	app.renderSuccess(w, "Pendência excluída definitivamente.")
 }
 
 func (app *Application) completeFollowUp(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +367,10 @@ func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
 		app.render(w, http.StatusOK, "client-search-results.html", []dashboardClientResult{})
 		return
 	}
+	if _, err := validateClientName(query); err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	clients, err := app.store.searchClients(query)
 	if err != nil {
 		app.renderError(w, "Não foi possível pesquisar clientes.", http.StatusInternalServerError)
@@ -296,7 +380,12 @@ func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) exactClients(w http.ResponseWriter, r *http.Request) {
-	clients, err := app.store.findClientsByExactName(r.URL.Query().Get("client_name"))
+	name, err := validateClientName(r.URL.Query().Get("client_name"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	clients, err := app.store.findClientsByExactName(name)
 	if err != nil {
 		http.Error(w, "Não foi possível verificar a cliente.", http.StatusInternalServerError)
 		return
@@ -387,17 +476,44 @@ func (app *Application) clientDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (app *Application) clientEditForm(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r.PathValue("id"))
+	if err != nil {
+		app.renderError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	client, err := app.store.getClient(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		app.renderError(w, "Não foi possível editar a cliente.", http.StatusInternalServerError)
+		return
+	}
+	app.render(w, http.StatusOK, "client-edit-form.html", client)
+}
+
 func (app *Application) updateClient(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r.PathValue("id"))
 	if err != nil {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := app.store.updateClient(id, r.FormValue("name"), r.FormValue("contact")); err != nil {
+	if err := app.store.updateClient(id, r.FormValue("name"), r.FormValue("contact"), r.FormValue("phone_change_confirmation")); err != nil {
+		var phoneChange *clientEditPhoneChangeRequiredError
+		if errors.As(err, &phoneChange) {
+			app.render(w, http.StatusConflict, "client-edit-phone-confirmation.html", ClientEditPhoneConfirmationView{
+				Name:           phoneChange.Client.Name,
+				CurrentPhone:   phoneChange.Client.Contact,
+				SubmittedPhone: phoneChange.SubmittedPhone,
+			})
+			return
+		}
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"followupsChanged":true}`)
+	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"clientChanged":true}`)
 	app.renderSuccess(w, "Dados da cliente atualizados.")
 }
 

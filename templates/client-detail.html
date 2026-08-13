@@ -6,20 +6,18 @@
             <div><p class="eyebrow">Ficha da cliente</p><h2 id="client-detail-title">{{.Client.Name}}</h2></div>
             <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
         </header>
-        <form class="client-edit no-print" hx-post="/clients/{{.Client.ID}}" hx-target="#client-edit-message" hx-swap="innerHTML">
-            <label class="field"><span>Nome *</span><input name="name" value="{{.Client.Name}}" required></label>
-            <label class="field"><span>Telefone *</span><input name="contact" value="{{.Client.Contact}}" data-phone-input required
-                autocomplete="tel" inputmode="numeric" pattern="\([0-9]{2}\) [0-9]{5}-[0-9]{4}"
-                placeholder="(00) 00000-0000" title="Informe um celular com DDD no formato (00) 00000-0000"></label>
-            <button class="button secondary align-end" type="submit">Atualizar dados</button>
-            <div id="client-edit-message" aria-live="polite"></div>
-        </form>
+        <section id="client-edit-region" class="client-summary no-print">
+            <div><span>Nome</span><strong>{{.Client.Name}}</strong></div>
+            <div><span>Telefone</span><strong>{{.Client.Contact}}</strong></div>
+            <button class="button secondary" type="button" hx-get="/clients/{{.Client.ID}}/edit"
+                hx-target="#client-edit-region" hx-swap="outerHTML">Editar cliente</button>
+        </section>
         <div class="table-scroll client-followups">
             <table>
                 <thead><tr><th>Descrição</th><th>Encaminhar para</th><th>Prazo</th><th>Prioridade</th><th>Status</th><th>Ações</th></tr></thead>
                 <tbody>
                 {{range .FollowUps}}
-                    <tr id="followup-{{.ID}}" class="{{if eq $.HighlightID .ID}}highlighted{{end}} {{if eq .Alert.Kind "OVERDUE"}}overdue-row{{end}}">
+                    <tr id="followup-{{.ID}}" class="{{if eq $.HighlightID .ID}}highlighted{{end}} {{if eq .Alert.Kind "OVERDUE"}}overdue-row{{else if eq .Alert.Kind "TODAY"}}today-row{{else if eq .Alert.Kind "TOMORROW"}}tomorrow-row{{end}}">
                         <td><strong>{{.Description}}</strong>{{if .Notes}}<small class="notes">{{.Notes}}</small>{{end}}</td>
                         <td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
                         <td>{{formatDate .DueDate}}{{if .Alert.Label}}<small class="deadline {{.Alert.Kind}}">{{.Alert.Label}}</small>{{end}}</td>

@@ -10,7 +10,7 @@
     <button class="metric attention" hx-get="/dashboard?due=TOMORROW" hx-target="#dashboard-content" hx-swap="outerHTML">
         <strong>{{.Counts.Tomorrow}}</strong><span>Vencem amanhã</span>
     </button>
-    <button class="metric" hx-get="/dashboard?status=PENDING" hx-target="#dashboard-content" hx-swap="outerHTML">
+    <button class="metric pending" hx-get="/dashboard?status=PENDING" hx-target="#dashboard-content" hx-swap="outerHTML">
         <strong>{{.Counts.Pending}}</strong><span>Pendentes</span>
     </button>
     <button class="metric success" hx-get="/dashboard?status=COMPLETED" hx-target="#dashboard-content" hx-swap="outerHTML">
