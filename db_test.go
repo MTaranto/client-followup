@@ -130,6 +130,36 @@ func TestSearchClientsUsesNameOnly(t *testing.T) {
 	}
 }
 
+func TestFindClientsByExactNameDoesNotMatchPartialNames(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	first, err := store.createClient("Ana Silva", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.createClient("ana silva", "(32) 98888-2222")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.createClient("Ana Souza", "(32) 97777-3333"); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := store.findClientsByExactName("  ANA SILVA  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || matches[0].ID != first.ID || matches[1].ID != second.ID {
+		t.Fatalf("exact matches = %#v; want clients %d and %d", matches, first.ID, second.ID)
+	}
+	matches, err = store.findClientsByExactName("Ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("partial name returned exact matches: %#v", matches)
+	}
+}
+
 func TestSelectedClientPhoneResolution(t *testing.T) {
 	t.Run("unchanged phone reuses ID", func(t *testing.T) {
 		store, _, _ := newTestStore(t)

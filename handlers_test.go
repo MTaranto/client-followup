@@ -106,15 +106,22 @@ func TestClientSuggestionsDistinguishHomonymousClients(t *testing.T) {
 	assertResponseContains(
 		t,
 		response,
-		`data-client-id="`+strconv.FormatInt(withContact.ID, 10)+`"`,
+		`hx-get="/followups/new?client_id=`+strconv.FormatInt(withContact.ID, 10)+`"`,
 		"(32) 99999-1111",
-		`data-client-id="`+strconv.FormatInt(withoutContact.ID, 10)+`"`,
+		`hx-get="/followups/new?client_id=`+strconv.FormatInt(withoutContact.ID, 10)+`"`,
 		"Cadastro #"+strconv.FormatInt(withoutContact.ID, 10),
 	)
 }
 
-func TestDashboardSearchUpdatesOnlyResults(t *testing.T) {
+func TestDashboardClientLookupDoesNotTargetFollowUpTable(t *testing.T) {
 	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente operacional", "(32) 99999-1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-14", "Pendência preservada", "", PriorityMedium, "", ""); err != nil {
+		t.Fatal(err)
+	}
 	app, err := newApplication(store, mustLocation(t))
 	if err != nil {
 		t.Fatal(err)
@@ -124,17 +131,106 @@ func TestDashboardSearchUpdatesOnlyResults(t *testing.T) {
 	assertResponseContains(
 		t,
 		response,
-		`id="dashboard-filters"`,
-		`hx-get="/dashboard/results"`,
-		`hx-target="#dashboard-results"`,
-		`hx-trigger="input, search, change"`,
+		`id="client-lookup"`,
+		`id="dashboard-client-search"`,
+		`hx-get="/clients/search"`,
+		`hx-target="#client-search-results"`,
+		`hx-trigger="input queue:last, search queue:last"`,
+		`type="submit">Buscar</button>`,
+		"Pendência preservada",
+	)
+	body := response.Body.String()
+	for _, removed := range []string{`<select name="priority"`, `<select name="status"`, `<select name="due"`, `>Limpar<`} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("dashboard still contains removed filter %q: %s", removed, body)
+		}
+	}
+	if strings.Contains(body, `hx-target="#dashboard-results" hx-swap="innerHTML"`) {
+		t.Fatalf("client lookup targets the follow-up table: %s", body)
+	}
+}
+
+func TestFollowUpFormCanBeOpenedFromClientOrTypedName(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Beatriz Lima", "(32) 96666-4444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	response := performRequest(handler, http.MethodGet, "/followups/new?client_id="+strconv.FormatInt(client.ID, 10), nil)
+	assertResponseContains(
+		t,
+		response,
+		`name="client_id" id="client-id" value="`+strconv.FormatInt(client.ID, 10)+`"`,
+		`name="client_name" value="Beatriz Lima"`,
+		`name="contact" value="(32) 96666-4444"`,
+		`name="start_date" value="2026-08-12"`,
 	)
 
-	response = performRequest(app.routes(), http.MethodGet, "/dashboard/results?q=Ana", nil)
-	if strings.Contains(response.Body.String(), `id="dashboard-filters"`) {
-		t.Fatalf("results response replaced the fixed filter form: %s", response.Body.String())
+	response = performRequest(handler, http.MethodGet, "/followups/new?client_name=Juliana+Carvalho", nil)
+	assertResponseContains(
+		t,
+		response,
+		`name="client_name" value="Juliana Carvalho"`,
+		`name="contact" value=""`,
+		`type="date" name="due_date"`,
+	)
+	if strings.Contains(response.Body.String(), `name="client_id" id="client-id" value="`+strconv.FormatInt(client.ID, 10)+`"`) {
+		t.Fatalf("typed name inherited an existing client ID: %s", response.Body.String())
 	}
-	assertResponseContains(t, response, `id="dashboard-results"`, `q=Ana`)
+	assertTableCount(t, store.db, "clients", 1)
+	assertTableCount(t, store.db, "followups", 0)
+
+	response = performRequest(handler, http.MethodGet, "/followups/new", nil)
+	assertResponseContains(t, response, `name="client_id" id="client-id" value=""`, `name="client_name" value=""`, `name="contact" value=""`)
+}
+
+func TestExactClientLookupDistinguishesZeroOnePartialAndMultipleMatches(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	first, err := store.createClient("Ana Silva", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.createClient("ana silva", "(32) 98888-2222")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beatriz, err := store.createClient("Beatriz Lima", "(32) 96666-4444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	response := performRequest(handler, http.MethodGet, "/clients/exact?client_name=Ana", nil)
+	assertResponseContains(t, response, `"clients":[]`)
+	response = performRequest(handler, http.MethodGet, "/clients/exact?client_name=beatriz+lima", nil)
+	assertResponseContains(t, response, `"id":`+strconv.FormatInt(beatriz.ID, 10), `"contact":"(32) 96666-4444"`)
+	response = performRequest(handler, http.MethodGet, "/clients/exact?client_name=ANA+SILVA", nil)
+	assertResponseContains(
+		t,
+		response,
+		`"id":`+strconv.FormatInt(first.ID, 10),
+		`"id":`+strconv.FormatInt(second.ID, 10),
+		"(32) 99999-1111",
+		"(32) 98888-2222",
+	)
+	response = performRequest(handler, http.MethodGet, "/clients/exact?client_name=Inexistente", nil)
+	assertResponseContains(t, response, `"clients":[]`)
+
+	response = performRequest(handler, http.MethodGet, "/followups/new", nil)
+	body := response.Body.String()
+	if strings.Contains(body, `hx-get="/clients/search"`) || strings.Contains(body, `client-suggestions`) {
+		t.Fatalf("follow-up form still contains incremental suggestions: %s", body)
+	}
 }
 
 func TestFollowUpPhoneChangeRequiresAndAppliesExplicitDecision(t *testing.T) {
@@ -159,8 +255,8 @@ func TestFollowUpPhoneChangeRequiresAndAppliesExplicitDecision(t *testing.T) {
 			response.Body.String(),
 			"(32) 99999-1111",
 			"(32) 98888-2222",
-			`name="phone_change_action" value="update"`,
-			`name="phone_change_action" value="new_client"`,
+			`data-phone-change-action="update"`,
+			`data-phone-change-action="new_client"`,
 		)
 		assertClientPhone(t, store, client.ID, "(32) 99999-1111")
 		assertTableCount(t, store.db, "followups", 0)
@@ -208,6 +304,62 @@ func TestFollowUpPhoneChangeRequiresAndAppliesExplicitDecision(t *testing.T) {
 		assertClientPhone(t, store, client.ID, "(32) 99999-1111")
 		assertClientPhone(t, store, newClientID, "(32) 98888-2222")
 	})
+}
+
+func TestPhoneChangeConfirmationOnFieldExitDoesNotPersist(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Ana Silva", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := url.Values{
+		"client_id":   {strconv.FormatInt(client.ID, 10)},
+		"client_name": {client.Name},
+		"contact":     {"(32) 98888-2222"},
+	}
+	response := performRequest(app.routes(), http.MethodGet, "/clients/phone-change-confirmation?"+query.Encode(), nil)
+	assertResponseContains(t, response, "(32) 99999-1111", "(32) 98888-2222", `data-phone-change-action="update"`)
+	assertClientPhone(t, store, client.ID, "(32) 99999-1111")
+	assertTableCount(t, store.db, "clients", 1)
+	assertTableCount(t, store.db, "followups", 0)
+
+	query.Set("contact", client.Contact)
+	response = performRequest(app.routes(), http.MethodGet, "/clients/phone-change-confirmation?"+query.Encode(), nil)
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "" {
+		t.Fatalf("unchanged phone produced confirmation: status %d body %q", response.Code, response.Body.String())
+	}
+}
+
+func TestFollowUpRejectsInvalidSelectedClientIdentity(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Ana Silva", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := followUpFormValues(client, client.Contact)
+	form.Set("client_name", "Outra Pessoa")
+	response := performRequest(app.routes(), http.MethodPost, "/followups", form)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "não corresponde") {
+		t.Fatalf("mismatched identity response = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	form = followUpFormValues(client, client.Contact)
+	form.Set("client_id", "999999")
+	response = performRequest(app.routes(), http.MethodPost, "/followups", form)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "não foi encontrada") {
+		t.Fatalf("missing identity response = %d, body = %s", response.Code, response.Body.String())
+	}
+	assertTableCount(t, store.db, "clients", 1)
+	assertTableCount(t, store.db, "followups", 0)
 }
 
 func TestFollowUpAndClientUpdateRejectInvalidPhones(t *testing.T) {
