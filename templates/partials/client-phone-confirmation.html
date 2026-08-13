@@ -1,0 +1,16 @@
+{{define "client-phone-confirmation.html"}}
+<div class="phone-confirmation" role="alert">
+    <p><strong>{{.Name}}</strong> já está cadastrada com:</p>
+    <p class="phone-comparison">{{if .CurrentPhone}}{{.CurrentPhone}}{{else}}Sem telefone cadastrado{{end}}</p>
+    <p>O telefone informado agora é:</p>
+    <p class="phone-comparison">{{.SubmittedPhone}}</p>
+    <div class="phone-confirmation-actions">
+        <button type="submit" class="button secondary" name="phone_change_action" value="update">
+            Atualizar telefone desta cliente
+        </button>
+        <button type="submit" class="button ghost" name="phone_change_action" value="new_client">
+            Cadastrar outra {{.Name}}
+        </button>
+    </div>
+</div>
+{{end}}

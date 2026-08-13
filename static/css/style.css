@@ -146,6 +146,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .message { padding: 10px 12px; border-radius: 7px; font-weight: 700; }
 .message.success { background: #e4f2e9; color: #2f6746; }
 .message.error { background: #fbe6e4; color: #8c3030; }
+.phone-confirmation { padding: 14px; border: 1px solid #e5c176; border-radius: 8px; background: #fff8e8; }
+.phone-confirmation p { margin: 0 0 8px; }
+.phone-comparison { color: var(--warning); font-size: 1.05rem; font-weight: 800; }
+.phone-confirmation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .flash-region { position: fixed; right: 20px; bottom: 20px; z-index: 1100; max-width: 380px; }
 .client-edit { display: grid; grid-template-columns: 1fr 1fr auto; }
 .client-followups { max-height: 56vh; border: 1px solid var(--line); border-radius: 8px; }

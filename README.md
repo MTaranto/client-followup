@@ -5,10 +5,10 @@ Aplicação local para controle das pendências de clientes da Roberta. O MVP us
 ## O que está implementado
 
 - cadastro de cliente no mesmo fluxo da nova pendência;
-- busca incremental por nome ou contato e preenchimento automático do contato;
+- busca incremental por nome e preenchimento automático do telefone;
 - datas de início e limite, prioridade, descrição, encaminhamento e observação;
 - painel com indicadores, busca e filtros operacionais;
-- ficha da cliente com edição de nome/contato e pendências não arquivadas;
+- ficha da cliente com edição de nome/telefone e pendências não arquivadas;
 - fluxo `PENDING → COMPLETED → PENDING` e `COMPLETED → ARCHIVED`;
 - alertas únicos para atrasadas, vencimento hoje e amanhã, com acesso e destaque da pendência;
 - consulta histórica por período, cliente, encaminhamento, prioridade, status e atraso;
@@ -106,7 +106,7 @@ Se existirem arquivos `client-followup.db-wal` ou `client-followup.db-shm` após
 
 ## Privacidade e limites
 
-O sistema é local, sem autenticação, porque escuta exclusivamente `127.0.0.1`. Qualquer pessoa com acesso à sessão ou aos arquivos do usuário poderá acessar os dados. Use apenas nome, contato e informações administrativas necessárias; o sistema não é prontuário e não deve receber dados clínicos ou médicos.
+O sistema é local, sem autenticação, porque escuta exclusivamente `127.0.0.1`. Qualquer pessoa com acesso à sessão ou aos arquivos do usuário poderá acessar os dados. Use apenas nome, telefone e informações administrativas necessárias; o sistema não é prontuário e não deve receber dados clínicos ou médicos.
 
 Esta primeira passagem não inclui sincronização, múltiplos usuários, login, envio de notificações, geração própria de PDF ou integração externa. A validação funcional final no Lenovo/Zorin e a revisão humana do código continuam necessárias antes do uso real.
 

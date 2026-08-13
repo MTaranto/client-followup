@@ -21,6 +21,7 @@
             return;
         }
 
+        modal.querySelectorAll("[data-phone-input]").forEach(formatPhoneInput);
         const autofocus = modal.querySelector("[autofocus]");
         if (autofocus) {
             autofocus.focus();
@@ -36,6 +37,45 @@
         if (suggestions) {
             suggestions.replaceChildren();
         }
+    }
+
+    function formatPhoneInput(input) {
+        const originalValue = input.value;
+        const originalCursor = input.selectionStart === null ? originalValue.length : input.selectionStart;
+        const digitsBeforeCursor = originalValue.slice(0, originalCursor).replace(/\D/g, "").length;
+        const digits = originalValue.replace(/\D/g, "").slice(0, 11);
+        let formatted = "";
+
+        if (digits.length > 0) {
+            formatted = "(" + digits.slice(0, 2);
+        }
+        if (digits.length > 2) {
+            formatted += ") " + digits.slice(2, 7);
+        }
+        if (digits.length > 7) {
+            formatted += "-" + digits.slice(7);
+        }
+
+        input.value = formatted;
+        if (input !== document.activeElement || input.selectionStart === null) {
+            return;
+        }
+
+        let cursor = 0;
+        let digitsSeen = 0;
+        while (cursor < formatted.length && digitsSeen < digitsBeforeCursor) {
+            if (/\d/.test(formatted[cursor])) {
+                digitsSeen += 1;
+            }
+            cursor += 1;
+        }
+        while (cursor < formatted.length && !/\d/.test(formatted[cursor])) {
+            cursor += 1;
+        }
+        if (digitsBeforeCursor >= digits.length) {
+            cursor = formatted.length;
+        }
+        input.setSelectionRange(cursor, cursor);
     }
 
     function invalidateClientSelection(nameInput) {
@@ -78,8 +118,9 @@
                 idInput.value = suggestion.dataset.clientId;
                 nameInput.value = suggestion.dataset.clientName;
                 contactInput.value = suggestion.dataset.clientContact;
+                formatPhoneInput(contactInput);
                 nameInput.dataset.selectedClientName = suggestion.dataset.clientName;
-                contactInput.dataset.autofilledContact = suggestion.dataset.clientContact;
+                contactInput.dataset.autofilledContact = contactInput.value;
                 clearSuggestions();
                 contactInput.focus();
             }
@@ -92,6 +133,9 @@
     });
 
     document.addEventListener("input", function (event) {
+        if (event.target.matches("[data-phone-input]")) {
+            formatPhoneInput(event.target);
+        }
         if (event.target.id === "client-name") {
             invalidateClientSelection(event.target);
             if (!event.target.value.trim()) {
@@ -115,6 +159,16 @@
     document.body.addEventListener("closeModal", closeModal);
     document.body.addEventListener("htmx:afterSwap", prepareModal);
     document.body.addEventListener("htmx:beforeSwap", function (event) {
+        if (event.detail.target.id === "client-suggestions") {
+            const idInput = document.getElementById("client-id");
+            const nameInput = document.getElementById("client-name");
+            if (idInput && idInput.value && nameInput &&
+                    nameInput.value === nameInput.dataset.selectedClientName) {
+                event.detail.shouldSwap = false;
+                clearSuggestions();
+                return;
+            }
+        }
         const status = event.detail.xhr.status;
         if (status >= 400 && status < 500) {
             event.detail.shouldSwap = true;

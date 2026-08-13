@@ -202,8 +202,18 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("forward_to"),
 		r.FormValue("priority"),
 		r.FormValue("notes"),
+		r.FormValue("phone_change_action"),
 	)
 	if err != nil {
+		var phoneChange *clientPhoneChangeRequiredError
+		if errors.As(err, &phoneChange) {
+			app.render(w, http.StatusConflict, "client-phone-confirmation.html", ClientPhoneConfirmationView{
+				Name:           phoneChange.Client.Name,
+				CurrentPhone:   phoneChange.Client.Contact,
+				SubmittedPhone: phoneChange.SubmittedPhone,
+			})
+			return
+		}
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
