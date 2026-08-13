@@ -53,6 +53,8 @@ func (app *Application) routes() http.Handler {
 	mux.HandleFunc("GET /health", app.health)
 	mux.HandleFunc("GET /{$}", app.dashboardPage)
 	mux.HandleFunc("GET /dashboard", app.dashboardContent)
+	mux.HandleFunc("GET /dashboard/results", app.dashboardResults)
+	mux.HandleFunc("GET /dashboard/metrics", app.dashboardMetrics)
 	mux.HandleFunc("GET /followups/new", app.followUpForm)
 	mux.HandleFunc("POST /followups", app.createFollowUp)
 	mux.HandleFunc("POST /followups/{id}/complete", app.completeFollowUp)
@@ -126,6 +128,24 @@ func (app *Application) dashboardContent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	app.render(w, http.StatusOK, "dashboard-content.html", view)
+}
+
+func (app *Application) dashboardResults(w http.ResponseWriter, r *http.Request) {
+	view, err := app.dashboardView(r)
+	if err != nil {
+		app.renderError(w, "Não foi possível atualizar o painel.", http.StatusInternalServerError)
+		return
+	}
+	app.render(w, http.StatusOK, "dashboard-results.html", view)
+}
+
+func (app *Application) dashboardMetrics(w http.ResponseWriter, r *http.Request) {
+	view, err := app.dashboardView(r)
+	if err != nil {
+		app.renderError(w, "Não foi possível atualizar os indicadores.", http.StatusInternalServerError)
+		return
+	}
+	app.render(w, http.StatusOK, "dashboard-metrics.html", view)
 }
 
 func (app *Application) dashboardView(r *http.Request) (DashboardView, error) {
