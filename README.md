@@ -1,122 +1,79 @@
 # Client Follow-up
 
-Aplicação local para controle das pendências de clientes da Roberta. O MVP usa Go, HTMX, templates HTML e SQLite, funciona sem internet e mantém os textos livres protegidos pelo escaping automático de `html/template`.
+**Português** | [English](README.en.md)
 
-## O que está implementado
+Aplicação local para acompanhamento de pendências de clientes, prazos, histórico e ações de retorno. O projeto foi desenvolvido para um fluxo operacional real, com foco em simplicidade, clareza e confiabilidade.
 
-- cadastro de cliente no mesmo fluxo da nova pendência;
-- busca de clientes sem distinção de acentos/maiúsculas no painel e resolução exata de identidade no cadastro de pendência;
-- datas de início e limite, prioridade, descrição, encaminhamento e observação;
-- painel com indicadores, busca de clientes e tabela operacional de pendências;
-- ficha da cliente inicialmente somente leitura, com edição explícita de nome/telefone e pendências não arquivadas;
-- edição e exclusão explícita somente de pendências abertas;
-- fluxo `PENDING → COMPLETED → PENDING` e `COMPLETED → ARCHIVED`;
-- alertas únicos para atrasadas, vencimento hoje e amanhã, com acesso e destaque da pendência;
-- consulta histórica por período, cliente, encaminhamento, prioridade, status e atraso;
-- impressão do relatório para “Salvar como PDF” no navegador;
-- backup SQLite diário com retenção dos 14 backups mais recentes;
-- endpoint `GET /health`, serviço `systemd --user` e abertura do navegador no login;
-- HTMX 2.0.8 armazenado em `static/vendor`, sem dependência de internet em execução.
+Funciona localmente no Linux, com dados persistidos em SQLite e interface web servida pela própria aplicação.
 
-Arquivadas não aparecem no painel ou na ficha operacional. Elas permanecem no banco e podem ser consultadas nos relatórios. A exclusão física existe somente para uma pendência aberta e confirmada; a cliente também é excluída na mesma transação apenas quando não resta nenhum outro registro em qualquer status.
+## Principais funcionalidades
 
-## Mapa do código
+- cadastro e edição de clientes;
+- criação, edição e exclusão de pendências abertas;
+- busca incremental de clientes sem distinção de maiúsculas/minúsculas e acentos;
+- tratamento explícito de clientes homônimos;
+- confirmação controlada para alteração e duplicidade de telefone;
+- datas de início e limite, prioridade, descrição, encaminhamento e observações;
+- dashboard com indicadores operacionais e alertas de prazo;
+- ciclo de estados `PENDING → COMPLETED → PENDING` e `COMPLETED → ARCHIVED`;
+- ficha individual do cliente com histórico operacional;
+- consulta e filtragem de registros por período, cliente, encaminhamento, prioridade e status;
+- impressão de relatórios pelo navegador para exportação em PDF;
+- interface responsiva para desktop, tablet e celular;
+- backup local automático do banco SQLite.
 
-- `main.go`: inicialização, fuso, backup e ciclo do servidor HTTP;
-- `db.go`: schema versionado, persistência, consultas e transições de estado;
-- `handlers.go`: rotas HTTP, validação de formulários e renderização;
-- `models.go`: tipos e valores permitidos;
-- `reminders.go`: regras e ordenação dos alertas;
-- `backup.go`: backup diário e retenção;
-- `templates/`: páginas e fragmentos HTMX com escaping automático;
-- `static/`: CSS, JavaScript mínimo e HTMX local;
-- `scripts/`, `systemd/` e `autostart/`: instalação e início no login.
+Pendências arquivadas deixam o fluxo operacional principal, mas permanecem disponíveis para consulta histórica.
 
-## Reaproveitamento do Estacionamento
+## Tecnologias
 
-O estado atual de `MTaranto/estacionamento-go-htmx` foi inspecionado antes da implementação. Foram adaptados os padrões compatíveis de servidor `net/http`, SQLite com `database/sql` e `go-sqlite3`, criação/evolução automática do schema, consultas parametrizadas, fragmentos e eventos HTMX, busca incremental, autofill, fuso `America/Sao_Paulo`, arquivos estáticos e interação de modal (Escape, overlay, scroll e foco).
+- **Go** — servidor HTTP, regras de negócio e acesso a dados;
+- **SQLite** — persistência local;
+- **HTMX** — interações dinâmicas sem framework frontend;
+- **HTML templates** — renderização no servidor;
+- **JavaScript** — apenas onde necessário para comportamento de interface;
+- **CSS** — layout responsivo e apresentação;
+- **GitHub Actions** — validação contínua do projeto.
 
-Não foram transportadas regras do estacionamento. A geração de HTML por concatenação também não foi copiada: nome, descrição, observação e encaminhamento passam por `html/template`.
+O HTMX é armazenado localmente no projeto, portanto a aplicação não depende de CDN durante a execução normal.
 
-## Executar durante o desenvolvimento
+## Arquitetura
 
-Requisitos: Go 1.26 ou compatível com o `go.mod`, GCC e cabeçalhos necessários ao `go-sqlite3`.
-
-```bash
-go run .
+```text
+Navegador
+   │
+   ▼
+Aplicação Go
+   │
+   ├── HTML templates
+   ├── HTMX
+   └── JavaScript mínimo
+   │
+   ▼
+SQLite
 ```
 
-Abra `http://127.0.0.1:8080`. O banco será criado em `data/client-followup.db` e o backup diário em `backups/`.
+A aplicação escuta localmente em `127.0.0.1`, mantendo o fluxo e os dados sob controle do próprio usuário.
 
-Opções disponíveis:
+## Instalação
 
-```bash
-go run . -addr 127.0.0.1:8081 -db /caminho/dados.db -backups /caminho/backups
-```
+A distribuição final para Linux será feita como **binário compilado**, de forma que o usuário final não precise instalar Go nem o utilitário `sqlite3` para utilizar a aplicação.
 
-## Validação técnica
+A camada de instalação está em preparação e será concluída antes da distribuição final. Ela prevê:
 
-```bash
-gofmt -w *.go
-go test ./...
-go vet ./...
-go test -race ./...
-```
+- launcher Linux por arquivo `.desktop`, com nome e ícone próprios no menu de aplicativos e/ou Área de Trabalho;
+- execução normal da aplicação pelo launcher;
+- opção de configuração para inicialização automática na sessão do usuário.
 
-Os testes usam bancos temporários e cobrem lembretes, ordenação, criação do schema, cadastro, busca parcial normalizada, resolução de homônimas, validação de nomes e telefones, edição e exclusão restritas por status, preservação do histórico, transições/timestamps, persistência após reabertura, backup/restauração, retenção e escaping de conteúdo digitado.
+As instruções definitivas de instalação serão adicionadas aqui após essa etapa ser concluída e validada.
 
-O workflow `.github/workflows/ci.yml` repete formatação, testes, `go vet` e detector de corrida no GitHub Actions quando o repositório for publicado.
+## Qualidade
 
-## Instalar no Zorin OS
+O projeto possui testes automatizados para regras de negócio e persistência, além de verificações com `go vet`, detector de corrida, validação de JavaScript e GitHub Actions.
 
-Execute no diretório do projeto:
+Os principais fluxos também passaram por validação manual no navegador, incluindo cadastro, busca, resolução de homônimos, telefone, ciclo de vida das pendências, sincronização do dashboard, relatórios, responsividade e impressão.
 
-```bash
-./scripts/install-user-service.sh
-```
+## Método S.C.A.L.E.
 
-O instalador compila e copia a aplicação para `~/.local/share/client-followup`, habilita o serviço de usuário e instala a entrada de autostart. Consulte o estado com:
+O projeto segue o **Método S.C.A.L.E.**, uma metodologia desenvolvida por mim, baseada em engenharia proporcional: adotar a solução profissional mais simples que resolva integralmente o problema validado, ampliando controles, testes e documentação conforme o risco real.
 
-```bash
-systemctl --user status client-followup.service
-journalctl --user -u client-followup.service
-```
-
-Para remover o serviço e os arquivos executáveis:
-
-```bash
-./scripts/uninstall-user-service.sh
-```
-
-O desinstalador preserva deliberadamente `data/` e `backups/`.
-
-## Backup, restauração e reversão
-
-Na inicialização, o SQLite cria no máximo um backup por dia pelo comando consistente `VACUUM INTO`. Os arquivos seguem o nome `client-followup-AAAA-MM-DD.db`.
-
-Para restaurar, pare o serviço, guarde uma cópia do banco atual e copie o backup escolhido para o caminho do banco:
-
-```bash
-systemctl --user stop client-followup.service
-cp ~/.local/share/client-followup/data/client-followup.db ~/client-followup-before-restore.db
-cp ~/.local/share/client-followup/backups/client-followup-AAAA-MM-DD.db ~/.local/share/client-followup/data/client-followup.db
-systemctl --user start client-followup.service
-```
-
-Se existirem arquivos `client-followup.db-wal` ou `client-followup.db-shm` após uma interrupção anormal, preserve-os junto com o banco atual antes de restaurar e solicite revisão técnica.
-
-## Privacidade e limites
-
-O sistema é local, sem autenticação, porque escuta exclusivamente `127.0.0.1`. Qualquer pessoa com acesso à sessão ou aos arquivos do usuário poderá acessar os dados. Use apenas nome, telefone e informações administrativas necessárias; o sistema não é prontuário e não deve receber dados clínicos ou médicos.
-
-Esta primeira passagem não inclui sincronização, múltiplos usuários, login, envio de notificações, geração própria de PDF ou integração externa. A validação funcional final no Lenovo/Zorin e a revisão humana do código continuam necessárias antes do uso real.
-
-## Registro de engenharia
-
-- **Problema e usuária:** controle local de pendências operacionais para Roberta.
-- **Escopo:** somente os itens e critérios de aceite do `ARCHITECTURE.md`.
-- **Risco:** moderado por persistência e dados pessoais não sensíveis.
-- **Dependência externa:** apenas `github.com/mattn/go-sqlite3`; HTMX é um arquivo estático local.
-- **Efeitos:** gravação do banco, backups diários, atualização de estado e exclusão transacional restrita a pendências abertas explicitamente confirmadas.
-- **Reversão:** desinstalador preserva dados; restauração documentada acima; alterações de código podem ser revertidas pelo Git após um commit aprovado.
-- **Implementação:** assistida por Codex; testes automatizados e ferramentas Go fornecem evidência independente, mas não equivalem a revisão humana.
+A implementação privilegia mudanças pequenas, estados explícitos, dependências locais, validação reproduzível, caminhos claros de reversão e aceite humano antes da integração.
