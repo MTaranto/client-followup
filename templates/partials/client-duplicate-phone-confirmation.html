@@ -1,0 +1,21 @@
+{{define "client-duplicate-phone-confirmation.html"}}
+{{with .}}
+<div class="phone-confirmation" role="alert">
+    <p><strong>Telefone já utilizado</strong></p>
+    <p>O telefone <strong>{{.SubmittedPhone}}</strong> já está cadastrado para:</p>
+    <ul class="duplicate-clients-list">
+        {{range .ExistingClients}}
+        <li><strong>{{.Name}}</strong> (Cadastro #{{.ID}})</li>
+        {{end}}
+    </ul>
+    <div class="phone-confirmation-actions">
+        <button type="button" class="button secondary" data-phone-duplicate-action="allow" data-duplicate-token="{{.ConfirmationToken}}">
+            Cadastrar mesmo assim
+        </button>
+        <button type="button" class="button ghost" data-cancel-phone-duplicate data-original-phone="{{.OriginalPhone}}">
+            Cancelar
+        </button>
+    </div>
+</div>
+{{end}}
+{{end}}

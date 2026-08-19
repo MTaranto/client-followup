@@ -2,41 +2,18 @@
 <div id="dashboard-content">
     {{template "dashboard-metrics.html" .}}
 
-    <form id="dashboard-filters" class="filter-bar no-print"
-        hx-get="/dashboard/results" hx-target="#dashboard-results" hx-swap="outerHTML"
-        hx-trigger="input, search, change">
+    <form id="client-lookup" class="filter-bar no-print"
+        hx-get="/followups/new" hx-target="#modal-container" hx-swap="innerHTML">
         <label class="field grow">
-            <span>Busca</span>
-            <input type="search" name="q" value="{{.Filters.Query}}" placeholder="Cliente, descrição ou encaminhamento" autocomplete="off">
+            <span>Cliente</span>
+            <input id="dashboard-client-search" type="search" name="client_name"
+                placeholder="Digite o nome do cliente" autocomplete="off"
+                hx-get="/clients/search" hx-target="#client-search-results" hx-swap="innerHTML"
+                hx-trigger="input queue:last, search queue:last">
         </label>
-        <label class="field">
-            <span>Prioridade</span>
-            <select name="priority">
-                <option value="">Todas</option>
-                <option value="HIGH" {{if eq .Filters.Priority "HIGH"}}selected{{end}}>Alta</option>
-                <option value="MEDIUM" {{if eq .Filters.Priority "MEDIUM"}}selected{{end}}>Média</option>
-                <option value="LOW" {{if eq .Filters.Priority "LOW"}}selected{{end}}>Baixa</option>
-            </select>
-        </label>
-        <label class="field">
-            <span>Status</span>
-            <select name="status">
-                <option value="">Todos</option>
-                <option value="PENDING" {{if eq .Filters.Status "PENDING"}}selected{{end}}>Pendente</option>
-                <option value="COMPLETED" {{if eq .Filters.Status "COMPLETED"}}selected{{end}}>Finalizado</option>
-            </select>
-        </label>
-        <label class="field">
-            <span>Prazo</span>
-            <select name="due">
-                <option value="">Todos</option>
-                <option value="OVERDUE" {{if eq .Filters.Due "OVERDUE"}}selected{{end}}>Atrasadas</option>
-                <option value="TODAY" {{if eq .Filters.Due "TODAY"}}selected{{end}}>Vencem hoje</option>
-                <option value="TOMORROW" {{if eq .Filters.Due "TOMORROW"}}selected{{end}}>Vencem amanhã</option>
-            </select>
-        </label>
-        <a class="button ghost align-end" href="/">Limpar</a>
+        <button class="button primary align-end" type="submit">Buscar</button>
     </form>
+    <div id="client-search-results" class="client-search-results no-print" aria-live="polite"></div>
 
     {{template "dashboard-results.html" .}}
 </div>

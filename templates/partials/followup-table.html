@@ -15,19 +15,19 @@
             </thead>
             <tbody>
                 {{range .FollowUps}}
-                <tr class="{{if eq .Alert.Kind "OVERDUE"}}overdue-row{{end}}">
-                    <td>
+                <tr class="{{if eq .Alert.Kind "OVERDUE"}}overdue-row{{else if eq .Alert.Kind "TODAY"}}today-row{{else if eq .Alert.Kind "TOMORROW"}}tomorrow-row{{end}}">
+                    <td data-label="Cliente">
                         <button class="link-button" type="button" hx-get="/clients/{{.ClientID}}" hx-target="#modal-container" hx-swap="innerHTML">{{.ClientName}}</button>
                     </td>
-                    <td><span class="description-cell">{{.Description}}</span></td>
-                    <td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
-                    <td>
+                    <td data-label="Descrição"><span class="description-cell">{{.Description}}</span></td>
+                    <td data-label="Encaminhar para">{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
+                    <td data-label="Prazo">
                         {{formatDate .DueDate}}
                         {{if .Alert.Label}}<small class="deadline {{.Alert.Kind}}">{{.Alert.Label}}</small>{{end}}
                     </td>
-                    <td><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
-                    <td><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
-                    <td class="actions no-print">{{template "followup-actions.html" .}}</td>
+                    <td data-label="Prioridade"><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
+                    <td data-label="Status"><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
+                    <td class="actions no-print" data-label="Ações">{{template "followup-actions.html" .}}</td>
                 </tr>
                 {{else}}
                 <tr><td colspan="7" class="empty-state">Nenhuma pendência encontrada com estes filtros.</td></tr>
@@ -41,16 +41,29 @@
 {{define "followup-actions.html"}}
 {{if eq .Status "PENDING"}}
 <label class="completion-check">
-    <input type="checkbox" aria-label="Marcar pendência como realizada"
+    <input type="checkbox" aria-label="Marcar pendência como finalizada"
         hx-post="/followups/{{.ID}}/complete" hx-trigger="change" hx-target="#flash" hx-swap="innerHTML">
-    <span>Realizado</span>
+    <span>Finalizar</span>
 </label>
+<button class="button compact secondary" type="button" hx-get="/followups/{{.ID}}/edit"
+    hx-target="#modal-container" hx-swap="innerHTML">Editar</button>
+<button class="button compact danger-button" type="button"
+    data-confirm-modal
+    data-confirm-title="Excluir pendência"
+    data-confirm-message="Excluir esta pendência? Essa ação remove definitivamente este registro."
+    data-confirm-action-text="Excluir"
+    data-confirm-button-class="danger-button"
+    data-confirm-url="/followups/{{.ID}}/delete">Excluir</button>
 {{else if eq .Status "COMPLETED"}}
 <form hx-post="/followups/{{.ID}}/reopen" hx-target="#flash" hx-swap="innerHTML">
     <button class="button compact secondary" type="submit">Reabrir</button>
 </form>
-<form hx-post="/followups/{{.ID}}/archive" hx-target="#flash" hx-swap="innerHTML" hx-confirm="Arquivar esta pendência finalizada?">
-    <button class="button compact ghost" type="submit">Arquivar</button>
-</form>
+<button class="button compact ghost" type="button"
+    data-confirm-modal
+    data-confirm-title="Arquivar pendência"
+    data-confirm-message="Arquivar esta pendência finalizada?"
+    data-confirm-action-text="Arquivar"
+    data-confirm-button-class="primary"
+    data-confirm-url="/followups/{{.ID}}/archive">Arquivar</button>
 {{end}}
 {{end}}

@@ -6,9 +6,17 @@
 </section>
 <form id="report-filters" class="report-filters no-print"
     hx-get="/reports/results" hx-target="#report-results" hx-swap="outerHTML"
-    hx-trigger="input changed delay:300ms, change">
-    <label class="field"><span>De</span><input type="date" name="date_from" value="{{.Filters.DateFrom}}"></label>
-    <label class="field"><span>Até</span><input type="date" name="date_to" value="{{.Filters.DateTo}}"></label>
+    hx-trigger="change, input changed delay:300ms from:[name=client], input changed delay:300ms from:[name=forward_to], search from:[name=client], search from:[name=forward_to]">
+    <label class="field"><span>De</span>
+        <input type="text" data-date-input data-date-target="report-date-from"
+            inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off">
+        <input type="hidden" id="report-date-from" name="date_from" value="{{.Filters.DateFrom}}">
+    </label>
+    <label class="field"><span>Até</span>
+        <input type="text" data-date-input data-date-target="report-date-to"
+            inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off">
+        <input type="hidden" id="report-date-to" name="date_to" value="{{.Filters.DateTo}}">
+    </label>
     <label class="field"><span>Cliente</span><input name="client" value="{{.Filters.Client}}"></label>
     <label class="field"><span>Encaminhar para</span><input name="forward_to" value="{{.Filters.ForwardTo}}"></label>
     <label class="field"><span>Prioridade</span><select name="priority">

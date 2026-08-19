@@ -1,0 +1,19 @@
+{{define "client-edit-form.html"}}
+<form id="client-edit-region" class="client-edit no-print" hx-post="/clients/{{.ID}}"
+    hx-target="#client-edit-message" hx-swap="innerHTML">
+    <input type="hidden" name="phone_change_confirmation" id="client-phone-change-confirmation">
+    <input type="hidden" name="duplicate_phone_decision" id="client-duplicate-phone-decision">
+    <input type="hidden" name="duplicate_phone_token" id="client-duplicate-phone-token">
+    <label class="field"><span>Nome *</span><input name="name" value="{{.Name}}" data-client-name-input required></label>
+    <label class="field"><span>Telefone *</span><input name="contact" value="{{.Contact}}" data-phone-input
+        data-original-phone="{{.Contact}}" required autocomplete="tel" inputmode="numeric"
+        pattern="\([0-9]{2}\) [0-9]{5}-[0-9]{4}" placeholder="(00) 00000-0000"
+        title="Informe um celular com DDD no formato (00) 00000-0000"></label>
+    <div class="client-edit-actions">
+        <button class="button secondary" type="submit">Salvar alterações</button>
+        <button class="button ghost" type="button" hx-get="/clients/{{.ID}}"
+            hx-target="#modal-container" hx-swap="innerHTML">Cancelar</button>
+    </div>
+    <div id="client-edit-message" class="full-width" aria-live="polite"></div>
+</form>
+{{end}}
