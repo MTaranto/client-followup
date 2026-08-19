@@ -192,12 +192,12 @@ func (app *Application) followUpForm(w http.ResponseWriter, r *http.Request) {
 	if value := r.URL.Query().Get("client_id"); value != "" {
 		clientID, err := parseID(value)
 		if err != nil {
-			app.renderError(w, "Selecione novamente a cliente.", http.StatusBadRequest)
+			app.renderError(w, "Selecione novamente o cliente.", http.StatusBadRequest)
 			return
 		}
 		client, err := app.store.getClient(clientID)
 		if errors.Is(err, sql.ErrNoRows) {
-			app.renderError(w, "Cliente não encontrada.", http.StatusNotFound)
+			app.renderError(w, "Cliente não encontrado.", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -221,7 +221,7 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 	if value := r.FormValue("client_id"); value != "" {
 		parsedID, err := parseID(value)
 		if err != nil {
-			app.renderError(w, "Selecione novamente a cliente.", http.StatusBadRequest)
+			app.renderError(w, "Selecione novamente o cliente.", http.StatusBadRequest)
 			return
 		}
 		clientID = parsedID
@@ -239,8 +239,20 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("notes"),
 		r.FormValue("phone_change_action"),
 		r.FormValue("client_resolution"),
+		r.FormValue("duplicate_phone_decision"),
+		r.FormValue("duplicate_phone_token"),
 	)
 	if err != nil {
+		var phoneDuplicate *clientDuplicatePhoneRequiredError
+		if errors.As(err, &phoneDuplicate) {
+			app.render(w, http.StatusConflict, "client-duplicate-phone-confirmation.html", ClientDuplicatePhoneConfirmationView{
+				Name:              r.FormValue("client_name"),
+				SubmittedPhone:    phoneDuplicate.SubmittedPhone,
+				ExistingClients:   phoneDuplicate.ExistingClients,
+				ConfirmationToken: phoneDuplicate.Token,
+			})
+			return
+		}
 		var phoneChange *clientPhoneChangeRequiredError
 		if errors.As(err, &phoneChange) {
 			app.render(w, http.StatusConflict, "client-phone-confirmation.html", ClientPhoneConfirmationView{
@@ -253,8 +265,8 @@ func (app *Application) createFollowUp(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"followupSaved":true,"closeModal":true}`)
-	app.renderSuccess(w, "Pendência cadastrada com sucesso.")
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (app *Application) editFollowUpForm(w http.ResponseWriter, r *http.Request) {
@@ -312,7 +324,7 @@ func (app *Application) deleteFollowUp(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	clientDeleted, err := app.store.deletePendingFollowUp(id)
+	_, err = app.store.deletePendingFollowUp(id)
 	if errors.Is(err, errInvalidTransition) {
 		app.renderError(w, "Somente pendências abertas podem ser excluídas.", http.StatusConflict)
 		return
@@ -321,29 +333,23 @@ func (app *Application) deleteFollowUp(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if clientDeleted {
-		// Close the deleted client's detail before broadcasting the refresh; otherwise
-		// its HTMX listener could refetch a record that no longer exists.
-		w.Header().Set("HX-Trigger", `{"closeModal":true,"followupsChanged":true}`)
-	} else {
-		w.Header().Set("HX-Trigger", `{"followupsChanged":true}`)
-	}
-	app.renderSuccess(w, "Pendência excluída definitivamente.")
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (app *Application) completeFollowUp(w http.ResponseWriter, r *http.Request) {
-	app.changeFollowUpStatus(w, r, StatusPending, StatusCompleted, "Pendência finalizada.")
+	app.changeFollowUpStatus(w, r, StatusPending, StatusCompleted)
 }
 
 func (app *Application) reopenFollowUp(w http.ResponseWriter, r *http.Request) {
-	app.changeFollowUpStatus(w, r, StatusCompleted, StatusPending, "Pendência reaberta.")
+	app.changeFollowUpStatus(w, r, StatusCompleted, StatusPending)
 }
 
 func (app *Application) archiveFollowUp(w http.ResponseWriter, r *http.Request) {
-	app.changeFollowUpStatus(w, r, StatusCompleted, StatusArchived, "Pendência arquivada.")
+	app.changeFollowUpStatus(w, r, StatusCompleted, StatusArchived)
 }
 
-func (app *Application) changeFollowUpStatus(w http.ResponseWriter, r *http.Request, fromStatus, toStatus, message string) {
+func (app *Application) changeFollowUpStatus(w http.ResponseWriter, r *http.Request, fromStatus, toStatus string) {
 	id, err := parseID(r.PathValue("id"))
 	if err != nil {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
@@ -357,8 +363,8 @@ func (app *Application) changeFollowUpStatus(w http.ResponseWriter, r *http.Requ
 		app.renderError(w, "Não foi possível atualizar a pendência.", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"followupsChanged":true}`)
-	app.renderSuccess(w, message)
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (app *Application) searchClients(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +393,7 @@ func (app *Application) exactClients(w http.ResponseWriter, r *http.Request) {
 	}
 	clients, err := app.store.findClientsByExactName(name)
 	if err != nil {
-		http.Error(w, "Não foi possível verificar a cliente.", http.StatusInternalServerError)
+		http.Error(w, "Não foi possível verificar o cliente.", http.StatusInternalServerError)
 		return
 	}
 	matches := make([]clientMatch, 0, len(clients))
@@ -403,31 +409,96 @@ func (app *Application) exactClients(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Application) phoneChangeConfirmation(w http.ResponseWriter, r *http.Request) {
-	clientID, err := parseID(r.URL.Query().Get("client_id"))
-	if err != nil {
-		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
-		return
-	}
-	client, err := app.store.getClient(clientID)
-	if err != nil || !strings.EqualFold(normalizeText(client.Name), normalizeText(r.URL.Query().Get("client_name"))) {
-		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
-		return
-	}
+	clientID, _ := parseID(r.URL.Query().Get("client_id"))
+	clientName := normalizeText(r.URL.Query().Get("client_name"))
 	submittedPhone, err := normalizePhone(r.URL.Query().Get("contact"))
 	if err != nil {
-		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	currentPhone, err := normalizePhone(client.Contact)
-	if err == nil && currentPhone == submittedPhone {
-		app.render(w, http.StatusOK, "client-phone-confirmation.html", nil)
-		return
+	phoneChangeAction := r.URL.Query().Get("phone_change_action")
+	duplicatePhoneDecision := r.URL.Query().Get("duplicate_phone_decision")
+	duplicatePhoneToken := r.URL.Query().Get("duplicate_phone_token")
+
+	if clientID > 0 {
+		client, err := app.store.getClient(clientID)
+		if err != nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if clientName == "" {
+			clientName = client.Name
+		}
+		currentPhone, err := normalizePhone(client.Contact)
+		if err == nil && currentPhone == submittedPhone {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		switch phoneChangeAction {
+		case PhoneChangeUpdate:
+			conflicts, err := app.store.findClientsByPhone(submittedPhone, clientID)
+			if err == nil && len(conflicts) > 0 {
+				token := app.store.phoneConfirmationToken(submittedPhone, clientID, conflicts)
+				if duplicatePhoneDecision != "allow" || duplicatePhoneToken != token {
+					app.render(w, http.StatusOK, "client-duplicate-phone-confirmation.html", ClientDuplicatePhoneConfirmationView{
+						Name:              clientName,
+						SubmittedPhone:    submittedPhone,
+						ExistingClients:   conflicts,
+						ConfirmationToken: token,
+						OriginalPhone:     client.Contact,
+						IsClientEdit:      false,
+					})
+					return
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		case PhoneChangeNewClient:
+			conflicts, err := app.store.findClientsByPhone(submittedPhone, 0)
+			if err == nil && len(conflicts) > 0 {
+				token := app.store.phoneConfirmationToken(submittedPhone, 0, conflicts)
+				if duplicatePhoneDecision != "allow" || duplicatePhoneToken != token {
+					app.render(w, http.StatusOK, "client-duplicate-phone-confirmation.html", ClientDuplicatePhoneConfirmationView{
+						Name:              clientName,
+						SubmittedPhone:    submittedPhone,
+						ExistingClients:   conflicts,
+						ConfirmationToken: token,
+						OriginalPhone:     client.Contact,
+						IsClientEdit:      false,
+					})
+					return
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		default:
+			app.render(w, http.StatusOK, "client-phone-confirmation.html", ClientPhoneConfirmationView{
+				Name:           client.Name,
+				CurrentPhone:   client.Contact,
+				SubmittedPhone: submittedPhone,
+			})
+			return
+		}
 	}
-	app.render(w, http.StatusOK, "client-phone-confirmation.html", ClientPhoneConfirmationView{
-		Name:           client.Name,
-		CurrentPhone:   client.Contact,
-		SubmittedPhone: submittedPhone,
-	})
+
+	conflicts, err := app.store.findClientsByPhone(submittedPhone, 0)
+	if err == nil && len(conflicts) > 0 {
+		token := app.store.phoneConfirmationToken(submittedPhone, 0, conflicts)
+		if duplicatePhoneDecision != "allow" || duplicatePhoneToken != token {
+			app.render(w, http.StatusOK, "client-duplicate-phone-confirmation.html", ClientDuplicatePhoneConfirmationView{
+				Name:              clientName,
+				SubmittedPhone:    submittedPhone,
+				ExistingClients:   conflicts,
+				ConfirmationToken: token,
+				OriginalPhone:     "",
+				IsClientEdit:      false,
+			})
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func dashboardClientResults(clients []Client) []dashboardClientResult {
@@ -454,16 +525,17 @@ func (app *Application) clientDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	client, err := app.store.getClient(id)
 	if errors.Is(err, sql.ErrNoRows) {
-		http.NotFound(w, r)
+		w.Header().Set("HX-Trigger", `{"closeModal":true}`)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if err != nil {
-		app.renderError(w, "Não foi possível abrir a ficha da cliente.", http.StatusInternalServerError)
+		app.renderError(w, "Não foi possível abrir a ficha do cliente.", http.StatusInternalServerError)
 		return
 	}
 	items, err := app.store.clientFollowUps(id)
 	if err != nil {
-		app.renderError(w, "Não foi possível carregar as pendências da cliente.", http.StatusInternalServerError)
+		app.renderError(w, "Não foi possível carregar as pendências do cliente.", http.StatusInternalServerError)
 		return
 	}
 	today := dateOnly(app.now().In(app.location))
@@ -488,7 +560,7 @@ func (app *Application) clientEditForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		app.renderError(w, "Não foi possível editar a cliente.", http.StatusInternalServerError)
+		app.renderError(w, "Não foi possível editar o cliente.", http.StatusInternalServerError)
 		return
 	}
 	app.render(w, http.StatusOK, "client-edit-form.html", client)
@@ -500,7 +572,19 @@ func (app *Application) updateClient(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := app.store.updateClient(id, r.FormValue("name"), r.FormValue("contact"), r.FormValue("phone_change_confirmation")); err != nil {
+	if err := app.store.updateClient(id, r.FormValue("name"), r.FormValue("contact"), r.FormValue("phone_change_confirmation"), r.FormValue("duplicate_phone_decision"), r.FormValue("duplicate_phone_token")); err != nil {
+		var phoneDuplicate *clientEditDuplicatePhoneRequiredError
+		if errors.As(err, &phoneDuplicate) {
+			app.render(w, http.StatusConflict, "client-duplicate-phone-confirmation.html", ClientDuplicatePhoneConfirmationView{
+				Name:              phoneDuplicate.Client.Name,
+				SubmittedPhone:    phoneDuplicate.SubmittedPhone,
+				ExistingClients:   phoneDuplicate.ExistingClients,
+				ConfirmationToken: phoneDuplicate.Token,
+				OriginalPhone:     phoneDuplicate.Client.Contact,
+				IsClientEdit:      true,
+			})
+			return
+		}
 		var phoneChange *clientEditPhoneChangeRequiredError
 		if errors.As(err, &phoneChange) {
 			app.render(w, http.StatusConflict, "client-edit-phone-confirmation.html", ClientEditPhoneConfirmationView{
@@ -514,7 +598,7 @@ func (app *Application) updateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"clientChanged":true}`)
-	app.renderSuccess(w, "Dados da cliente atualizados.")
+	app.renderSuccess(w, "Dados do cliente atualizados.")
 }
 
 func (app *Application) reminders(w http.ResponseWriter, _ *http.Request) {

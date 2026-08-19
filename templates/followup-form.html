@@ -9,6 +9,8 @@
             <div class="full-width">
                 <input type="hidden" name="client_id" id="client-id" value="{{if .ClientID}}{{.ClientID}}{{end}}">
                 <input type="hidden" name="phone_change_action" id="phone-change-action">
+                <input type="hidden" name="duplicate_phone_decision" id="duplicate-phone-decision">
+                <input type="hidden" name="duplicate_phone_token" id="duplicate-phone-token">
                 <input type="hidden" name="client_resolution" id="client-resolution" value="{{if .Resolved}}existing{{end}}">
                 <label class="field">
                     <span>Cliente *</span>
@@ -18,24 +20,29 @@
                 </label>
             </div>
             <div id="client-match-choice" class="client-match-choice full-width" aria-live="polite"></div>
-            <fieldset id="followup-fields" class="followup-fields full-width" {{if not .Resolved}}disabled{{end}}>
+            <div id="client-contact-region" class="full-width">
                 <label class="field full-width">
                     <span>Telefone *</span>
                     <input id="client-contact" name="contact" value="{{.Contact}}" data-phone-input required autocomplete="tel" inputmode="numeric"
                         pattern="\([0-9]{2}\) [0-9]{5}-[0-9]{4}" placeholder="(00) 00000-0000"
                         title="Informe um celular com DDD no formato (00) 00000-0000"
-                        hx-get="/clients/phone-change-confirmation" hx-trigger="change"
-                        hx-target="#phone-change-confirmation" hx-swap="innerHTML" hx-include="closest form"
+                        {{if not .Resolved}}disabled{{end}}
                         {{if .ClientID}}data-autofilled-contact="{{.Contact}}"{{end}}>
                 </label>
                 <div id="phone-change-confirmation" class="full-width" aria-live="polite"></div>
+            </div>
+            <fieldset id="followup-fields" class="followup-fields full-width" {{if not .Resolved}}disabled{{end}}>
                 <label class="field">
                     <span>Data de início *</span>
-                    <input type="date" name="start_date" value="{{.Today}}" required>
+                    <input id="followup-start-date" type="text" data-date-input data-date-target="followup-start-date-hidden"
+                        inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off" required>
+                    <input type="hidden" id="followup-start-date-hidden" name="start_date" value="{{.Today}}">
                 </label>
                 <label class="field">
                     <span>Data limite *</span>
-                    <input type="date" name="due_date" required>
+                    <input id="followup-due-date" type="text" data-date-input data-date-target="followup-due-date-hidden"
+                        inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" autocomplete="off" required>
+                    <input type="hidden" id="followup-due-date-hidden" name="due_date">
                 </label>
                 <label class="field">
                     <span>Prioridade *</span>

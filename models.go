@@ -134,6 +134,15 @@ type ClientEditPhoneConfirmationView struct {
 	SubmittedPhone string
 }
 
+type ClientDuplicatePhoneConfirmationView struct {
+	Name              string
+	SubmittedPhone    string
+	ExistingClients   []Client
+	ConfirmationToken string
+	OriginalPhone     string
+	IsClientEdit      bool
+}
+
 type ClientDetailView struct {
 	Client      Client
 	FollowUps   []FollowUp

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -15,7 +20,7 @@ import (
 )
 
 var errInvalidTransition = errors.New("transição de status inválida")
-var errClientResolutionRequired = errors.New("escolha uma cliente existente ou confirme o cadastro de uma nova cliente com este nome")
+var errClientResolutionRequired = errors.New("escolha um cliente existente ou confirme o cadastro de um novo cliente com este nome")
 
 var (
 	digitsOnlyPhonePattern = regexp.MustCompile(`^[0-9]{11}$`)
@@ -32,17 +37,50 @@ type clientEditPhoneChangeRequiredError struct {
 	SubmittedPhone string
 }
 
+type clientDuplicatePhoneRequiredError struct {
+	SubmittedPhone  string
+	ExistingClients []Client
+	Token           string
+}
+
+type clientEditDuplicatePhoneRequiredError struct {
+	Client          Client
+	SubmittedPhone  string
+	ExistingClients []Client
+	Token           string
+}
+
 func (err *clientEditPhoneChangeRequiredError) Error() string {
-	return "confirme a alteração do telefone da cliente"
+	return "confirme a alteração do telefone do cliente"
 }
 
 func (err *clientPhoneChangeRequiredError) Error() string {
 	return "confirme como o telefone diferente deve ser tratado"
 }
 
+func (err *clientDuplicatePhoneRequiredError) Error() string {
+	return "confirme o uso do telefone já associado a outro cliente"
+}
+
+func (err *clientEditDuplicatePhoneRequiredError) Error() string {
+	return "confirme a alteração para telefone já associado a outro cliente"
+}
+
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db          *sql.DB
+	now         func() time.Time
+	tokenSecret []byte
+}
+
+func (store *Store) phoneConfirmationToken(phone string, clientID int64, conflicts []Client) string {
+	var ids []string
+	for _, c := range conflicts {
+		ids = append(ids, fmt.Sprintf("%d", c.ID))
+	}
+	sort.Strings(ids)
+	mac := hmac.New(sha256.New, store.tokenSecret)
+	fmt.Fprintf(mac, "phone-confirm-v1:%s:%d:%s", phone, clientID, strings.Join(ids, ","))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 func openStore(databasePath string, now func() time.Time) (*Store, error) {
@@ -57,7 +95,13 @@ func openStore(databasePath string, now func() time.Time) (*Store, error) {
 	}
 	database.SetMaxOpenConns(1)
 
-	store := &Store{db: database, now: now}
+	tokenSecret := make([]byte, 32)
+	if _, err := rand.Read(tokenSecret); err != nil {
+		database.Close()
+		return nil, fmt.Errorf("inicializar secret de autenticação: %w", err)
+	}
+
+	store := &Store{db: database, now: now, tokenSecret: tokenSecret}
 	if err := store.migrate(); err != nil {
 		database.Close()
 		return nil, err
@@ -152,7 +196,7 @@ func (store *Store) createClient(name, contact string) (Client, error) {
 	return Client{ID: id, Name: name, Contact: contact, CreatedAt: now, UpdatedAt: now}, nil
 }
 
-func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name, contact, phoneChangeAction, clientResolution string) (int64, error) {
+func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name, contact, phoneChangeAction, clientResolution, duplicatePhoneDecision, duplicatePhoneToken string) (int64, error) {
 	name, err := validateClientName(name)
 	if err != nil {
 		return 0, err
@@ -164,12 +208,12 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 			&existing.ID, &existing.Name, &existing.Contact, &existing.CreatedAt, &existing.UpdatedAt,
 		); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return 0, errors.New("cliente selecionada não foi encontrada")
+				return 0, errors.New("cliente selecionado não foi encontrado")
 			}
 			return 0, fmt.Errorf("consultar cliente: %w", err)
 		}
 		if normalizeClientName(existing.Name) != normalizeClientName(name) {
-			return 0, errors.New("o nome não corresponde à cliente selecionada; selecione novamente")
+			return 0, errors.New("o nome não corresponde ao cliente selecionado; selecione novamente")
 		}
 
 		existingPhone, existingPhoneErr := normalizePhone(existing.Contact)
@@ -179,20 +223,51 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 
 		switch phoneChangeAction {
 		case PhoneChangeUpdate:
+			conflicts, err := findClientsByPhoneQuery(transaction, contact, clientID)
+			if err != nil {
+				return 0, fmt.Errorf("verificar duplicidade de telefone: %w", err)
+			}
+			if len(conflicts) > 0 {
+				expectedToken := store.phoneConfirmationToken(contact, clientID, conflicts)
+				if duplicatePhoneDecision != "allow" || duplicatePhoneToken != expectedToken {
+					return 0, &clientDuplicatePhoneRequiredError{SubmittedPhone: contact, ExistingClients: conflicts, Token: expectedToken}
+				}
+			}
 			if _, err := transaction.Exec("UPDATE clients SET contact = ?, updated_at = ? WHERE id = ?", contact, store.now(), clientID); err != nil {
-				return 0, fmt.Errorf("atualizar telefone da cliente: %w", err)
+				return 0, fmt.Errorf("atualizar telefone do cliente: %w", err)
 			}
 			return clientID, nil
 		case PhoneChangeNewClient:
+			conflicts, err := findClientsByPhoneQuery(transaction, contact, 0)
+			if err != nil {
+				return 0, fmt.Errorf("verificar duplicidade de telefone: %w", err)
+			}
+			if len(conflicts) > 0 {
+				expectedToken := store.phoneConfirmationToken(contact, 0, conflicts)
+				if duplicatePhoneDecision != "allow" || duplicatePhoneToken != expectedToken {
+					return 0, &clientDuplicatePhoneRequiredError{SubmittedPhone: contact, ExistingClients: conflicts, Token: expectedToken}
+				}
+			}
 			return insertClient(transaction, name, contact, store.now())
 		default:
 			return 0, &clientPhoneChangeRequiredError{Client: existing, SubmittedPhone: contact}
 		}
 	}
 
+	conflicts, err := findClientsByPhoneQuery(transaction, contact, 0)
+	if err != nil {
+		return 0, fmt.Errorf("verificar duplicidade de telefone: %w", err)
+	}
+	if len(conflicts) > 0 {
+		expectedToken := store.phoneConfirmationToken(contact, 0, conflicts)
+		if duplicatePhoneDecision != "allow" || duplicatePhoneToken != expectedToken {
+			return 0, &clientDuplicatePhoneRequiredError{SubmittedPhone: contact, ExistingClients: conflicts, Token: expectedToken}
+		}
+	}
+
 	matches, err := findClientsByExactNameQuery(transaction, name, 2)
 	if err != nil {
-		return 0, fmt.Errorf("consultar clientes homônimas: %w", err)
+		return 0, fmt.Errorf("consultar clientes homônimos: %w", err)
 	}
 	// A missing client ID is ambiguous when the normalized name already exists.
 	// Requiring the explicit homonym choice prevents forged requests from silently
@@ -201,7 +276,7 @@ func (store *Store) findOrCreateClient(transaction *sql.Tx, clientID int64, name
 		return 0, errClientResolutionRequired
 	}
 	if clientResolution == ClientResolutionNewHomonym && len(matches) == 0 {
-		return 0, errors.New("não há clientes homônimas para esta decisão")
+		return 0, errors.New("não há clientes homônimos para esta decisão")
 	}
 	return insertClient(transaction, name, contact, store.now())
 }
@@ -217,16 +292,21 @@ func insertClient(transaction *sql.Tx, name, contact string, now time.Time) (int
 	return result.LastInsertId()
 }
 
-func (store *Store) createFollowUp(clientID int64, clientName, contact, startDate, dueDate, description, forwardTo, priority, notes, phoneChangeAction, clientResolution string) (int64, error) {
+func (store *Store) createFollowUp(clientID int64, clientName, contact, startDate, dueDate, description, forwardTo, priority, notes, phoneChangeAction, clientResolution, duplicatePhoneDecision, duplicatePhoneToken string) (int64, error) {
 	contact, err := normalizePhone(contact)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := time.Parse("2006-01-02", startDate); err != nil {
+	parsedStart, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
 		return 0, errors.New("a data de início é inválida")
 	}
-	if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+	parsedDue, err := time.Parse("2006-01-02", dueDate)
+	if err != nil {
 		return 0, errors.New("a data limite é obrigatória e deve ser válida")
+	}
+	if parsedDue.Before(parsedStart) {
+		return 0, errors.New("a data limite não pode ser anterior à data de início")
 	}
 	description = normalizeText(description)
 	if description == "" {
@@ -242,7 +322,7 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 	}
 	defer transaction.Rollback()
 
-	resolvedClientID, err := store.findOrCreateClient(transaction, clientID, clientName, contact, phoneChangeAction, clientResolution)
+	resolvedClientID, err := store.findOrCreateClient(transaction, clientID, clientName, contact, phoneChangeAction, clientResolution, duplicatePhoneDecision, duplicatePhoneToken)
 	if err != nil {
 		return 0, err
 	}
@@ -265,7 +345,7 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 	return id, nil
 }
 
-func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmation string) error {
+func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmation, duplicatePhoneDecision, duplicatePhoneToken string) error {
 	name, err := validateClientName(name)
 	if err != nil {
 		return err
@@ -277,19 +357,31 @@ func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmatio
 	existing, err := store.getClient(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("cliente não encontrada")
+			return errors.New("cliente não encontrado")
 		}
 		return fmt.Errorf("consultar cliente: %w", err)
 	}
 	currentPhone, currentPhoneErr := normalizePhone(existing.Contact)
-	if (currentPhoneErr != nil || currentPhone != contact) && phoneChangeConfirmation != ClientPhoneChangeConfirmation {
-		return &clientEditPhoneChangeRequiredError{Client: existing, SubmittedPhone: contact}
+	if currentPhoneErr != nil || currentPhone != contact {
+		conflicts, err := findClientsByPhoneQuery(store.db, contact, id)
+		if err != nil {
+			return fmt.Errorf("verificar duplicidade de telefone: %w", err)
+		}
+		if len(conflicts) > 0 {
+			expectedToken := store.phoneConfirmationToken(contact, id, conflicts)
+			if duplicatePhoneDecision != "allow" || duplicatePhoneToken != expectedToken {
+				return &clientEditDuplicatePhoneRequiredError{Client: existing, ExistingClients: conflicts, SubmittedPhone: contact, Token: expectedToken}
+			}
+		}
+		if phoneChangeConfirmation != ClientPhoneChangeConfirmation {
+			return &clientEditPhoneChangeRequiredError{Client: existing, SubmittedPhone: contact}
+		}
 	}
 	result, err := store.db.Exec("UPDATE clients SET name = ?, contact = ?, updated_at = ? WHERE id = ?", name, contact, store.now(), id)
 	if err != nil {
 		return fmt.Errorf("atualizar cliente: %w", err)
 	}
-	return requireChangedRow(result, "cliente não encontrada")
+	return requireChangedRow(result, "cliente não encontrado")
 }
 
 func (store *Store) transitionFollowUp(id int64, fromStatus, toStatus string) error {
@@ -339,11 +431,16 @@ func (store *Store) getFollowUp(id int64) (FollowUp, error) {
 }
 
 func (store *Store) updatePendingFollowUp(id int64, startDate, dueDate, description, forwardTo, priority, notes string) error {
-	if _, err := time.Parse("2006-01-02", startDate); err != nil {
+	parsedStart, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
 		return errors.New("a data de início é inválida")
 	}
-	if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+	parsedDue, err := time.Parse("2006-01-02", dueDate)
+	if err != nil {
 		return errors.New("a data limite é obrigatória e deve ser válida")
+	}
+	if parsedDue.Before(parsedStart) {
+		return errors.New("a data limite não pode ser anterior à data de início")
 	}
 	description = normalizeText(description)
 	if description == "" {
@@ -459,6 +556,35 @@ func (store *Store) searchClients(query string) ([]Client, error) {
 	return clients, rows.Err()
 }
 
+func (store *Store) findClientsByPhone(phone string, excludeClientID int64) ([]Client, error) {
+	return findClientsByPhoneQuery(store.db, phone, excludeClientID)
+}
+
+func findClientsByPhoneQuery(queryer clientQueryer, phone string, excludeClientID int64) ([]Client, error) {
+	phone, err := normalizePhone(phone)
+	if err != nil {
+		return []Client{}, nil
+	}
+	rows, err := queryer.Query(`SELECT id, name, contact, created_at, updated_at FROM clients WHERE id != ? ORDER BY id`, excludeClientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	clients := []Client{}
+	for rows.Next() {
+		var client Client
+		if err := rows.Scan(&client.ID, &client.Name, &client.Contact, &client.CreatedAt, &client.UpdatedAt); err != nil {
+			return nil, err
+		}
+		cPhone, err := normalizePhone(client.Contact)
+		if err == nil && cPhone == phone {
+			clients = append(clients, client)
+		}
+	}
+	return clients, rows.Err()
+}
+
 func (store *Store) findClientsByExactName(name string) ([]Client, error) {
 	return findClientsByExactNameQuery(store.db, name, 8)
 }
@@ -498,8 +624,9 @@ func normalizeClientName(value string) string {
 	// SQLite NOCASE only handles ASCII. Folding the Portuguese characters in Go
 	// keeps the original stored text untouched and avoids a schema or dependency
 	// solely for the small local client dataset.
+	value = strings.Join(strings.Fields(value), " ")
 	var normalized strings.Builder
-	for _, character := range strings.ToLower(normalizeText(value)) {
+	for _, character := range strings.ToLower(value) {
 		switch character {
 		case 'á', 'à', 'â', 'ã', 'ä':
 			character = 'a'
@@ -526,11 +653,11 @@ func normalizeClientName(value string) string {
 func validateClientName(value string) (string, error) {
 	value = normalizeText(value)
 	if value == "" {
-		return "", errors.New("o nome da cliente é obrigatório")
+		return "", errors.New("o nome do cliente é obrigatório")
 	}
 	for _, character := range value {
 		if unicode.IsDigit(character) {
-			return "", errors.New("o nome da cliente não pode conter números")
+			return "", errors.New("o nome do cliente não pode conter números")
 		}
 	}
 	return value, nil
@@ -671,14 +798,6 @@ func (store *Store) reportFollowUps(filters ReportFilters, today string) ([]Foll
 		where = append(where, "f.due_date <= ?")
 		arguments = append(arguments, filters.DateTo)
 	}
-	if filters.Client != "" {
-		where = append(where, "c.name LIKE ? COLLATE NOCASE")
-		arguments = append(arguments, "%"+filters.Client+"%")
-	}
-	if filters.ForwardTo != "" {
-		where = append(where, "f.forward_to LIKE ? COLLATE NOCASE")
-		arguments = append(arguments, "%"+filters.ForwardTo+"%")
-	}
 	if validPriority(filters.Priority) {
 		where = append(where, "f.priority = ?")
 		arguments = append(arguments, filters.Priority)
@@ -699,5 +818,28 @@ func (store *Store) reportFollowUps(filters ReportFilters, today string) ([]Foll
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFollowUps(rows)
+
+	items, err := scanFollowUps(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	clientQuery := normalizeClientName(filters.Client)
+	forwardQuery := normalizeClientName(filters.ForwardTo)
+
+	if clientQuery == "" && forwardQuery == "" {
+		return items, nil
+	}
+
+	filtered := make([]FollowUp, 0, len(items))
+	for _, item := range items {
+		if clientQuery != "" && !strings.Contains(normalizeClientName(item.ClientName), clientQuery) {
+			continue
+		}
+		if forwardQuery != "" && !strings.Contains(normalizeClientName(item.ForwardTo), forwardQuery) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
 }

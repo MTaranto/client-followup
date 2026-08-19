@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,7 +34,7 @@ func TestDatabaseCreationAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	followUpID, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Enviar retorno", "Equipe", PriorityHigh, "Observação", "", ClientResolutionExisting)
+	followUpID, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Enviar retorno", "Equipe", PriorityHigh, "Observação", "", ClientResolutionExisting, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func TestClientPhoneIsRequired(t *testing.T) {
 	if client.Contact != "(32) 99999-1234" {
 		t.Fatalf("stored phone = %q, want formatted phone", client.Contact)
 	}
-	if err := store.updateClient(client.ID, client.Name, "", ""); err == nil {
+	if err := store.updateClient(client.ID, client.Name, "", "", "", ""); err == nil {
 		t.Fatal("updateClient accepted an empty phone")
 	}
 }
@@ -149,7 +150,7 @@ func TestFindClientsByExactNameDoesNotMatchPartialNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(matches) != 2 || matches[0].ID != first.ID || matches[1].ID != second.ID {
-		t.Fatalf("exact matches = %#v; want clients %d and %d", matches, first.ID, second.ID)
+		t.Fatalf("exact matches = %#v, want [%d, %d]", matches, first.ID, second.ID)
 	}
 	matches, err = store.findClientsByExactName("Ana")
 	if err != nil {
@@ -157,6 +158,33 @@ func TestFindClientsByExactNameDoesNotMatchPartialNames(t *testing.T) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("partial name returned exact matches: %#v", matches)
+	}
+}
+
+func TestFindClientsByExactNameSupportsLegacyWhitespace(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	legacy := insertLegacyClient(t, store, "  Ana   Paula  ", "(32) 99999-1111")
+
+	matches, err := store.findClientsByExactName("Ana Paula")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].ID != legacy.ID {
+		t.Fatalf("exact matches for legacy client = %#v, want client %d", matches, legacy.ID)
+	}
+}
+
+func TestFindClientsByExactNameUsesInsertionOrderTiebreak(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	first := insertLegacyClient(t, store, "Carlos Silva", "(32) 99999-1111")
+	second := insertLegacyClient(t, store, "carlos silva", "(32) 98888-2222")
+
+	matches, err := store.findClientsByExactName("Carlos Silva")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || matches[0].ID != first.ID || matches[1].ID != second.ID {
+		t.Fatalf("exact matches order = %#v, want [%d, %d]", matches, first.ID, second.ID)
 	}
 }
 
@@ -182,19 +210,19 @@ func TestClientNameMatchingPreservesTextAndIgnoresPortugueseDiacritics(t *testin
 	}
 }
 
-func TestClientNameValidationRejectsUnicodeDigits(t *testing.T) {
+func TestValidateClientNameRejectsLeadingDigitsAndForbiddenCharacters(t *testing.T) {
 	store, _, _ := newTestStore(t)
-	for _, name := range []string{"Ana 2", "Ana ٢", "Ana ２"} {
+	for _, name := range []string{"123 Ana", "Ana 2", "Ana ٢", "Ana ２"} {
 		if _, err := store.createClient(name, "(32) 99999-1111"); err == nil {
-			t.Errorf("createClient accepted name %q containing a digit", name)
+			t.Fatalf("createClient accepted invalid name %q", name)
 		}
 	}
 
-	client, err := store.createClient("Ana Clara", "(32) 99999-1111")
+	client, err := store.createClient("Ana Silva", "(32) 99999-1111")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.updateClient(client.ID, "Ana ٢", client.Contact, ""); err == nil {
+	if err := store.updateClient(client.ID, "Ana ٢", client.Contact, "", "", ""); err == nil {
 		t.Fatal("updateClient accepted a Unicode digit")
 	}
 	unchanged, err := store.getClient(client.ID)
@@ -212,7 +240,7 @@ func TestCreateFollowUpRequiresExplicitHomonymResolution(t *testing.T) {
 
 	_, err = store.createFollowUp(
 		0, "JOAO COSTA", "(32) 98888-2222", "2026-08-12", "2026-08-13",
-		"Retorno ambíguo", "", PriorityMedium, "", "", ClientResolutionNew,
+		"Retorno ambíguo", "", PriorityMedium, "", "", ClientResolutionNew, "", "",
 	)
 	if !errors.Is(err, errClientResolutionRequired) {
 		t.Fatalf("ambiguous creation error = %v, want explicit resolution error", err)
@@ -222,7 +250,7 @@ func TestCreateFollowUpRequiresExplicitHomonymResolution(t *testing.T) {
 
 	followUpID, err := store.createFollowUp(
 		0, "JOAO COSTA", "(32) 98888-2222", "2026-08-12", "2026-08-13",
-		"Retorno da homônima", "", PriorityMedium, "", "", ClientResolutionNewHomonym,
+		"Retorno da homônima", "", PriorityMedium, "", "", ClientResolutionNewHomonym, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -238,19 +266,19 @@ func TestUpdateClientPreservesIdentityAndRequiresPhoneConfirmation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.updateClient(client.ID, "Ana Souza", client.Contact, ""); err != nil {
+	if err := store.updateClient(client.ID, "Ana Souza", client.Contact, "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	assertTableCount(t, store.db, "clients", 1)
 
-	err = store.updateClient(client.ID, "Ana Souza", "(32) 98888-2222", "")
+	err = store.updateClient(client.ID, "Ana Souza", "(32) 98888-2222", "", "", "")
 	var confirmation *clientEditPhoneChangeRequiredError
 	if !errors.As(err, &confirmation) {
 		t.Fatalf("phone update error = %v, want confirmation", err)
 	}
 	assertClientPhone(t, store, client.ID, "(32) 99999-1111")
 
-	if err := store.updateClient(client.ID, "Ana Souza", "(32) 98888-2222", ClientPhoneChangeConfirmation); err != nil {
+	if err := store.updateClient(client.ID, "Ana Souza", "(32) 98888-2222", ClientPhoneChangeConfirmation, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := store.getClient(client.ID)
@@ -269,7 +297,7 @@ func TestSelectedClientPhoneResolution(t *testing.T) {
 		}
 		followUpID, err := store.createFollowUp(
 			client.ID, client.Name, "32999991111", "2026-08-12", "2026-08-13",
-			"Pendência", "", PriorityMedium, "", "", ClientResolutionExisting,
+			"Pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -287,7 +315,7 @@ func TestSelectedClientPhoneResolution(t *testing.T) {
 		}
 		_, err = store.createFollowUp(
 			client.ID, client.Name, "(32) 98888-2222", "2026-08-12", "2026-08-13",
-			"Pendência", "", PriorityMedium, "", "", ClientResolutionExisting,
+			"Pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 		)
 		var confirmation *clientPhoneChangeRequiredError
 		if !errors.As(err, &confirmation) {
@@ -305,7 +333,7 @@ func TestSelectedClientPhoneResolution(t *testing.T) {
 		}
 		followUpID, err := store.createFollowUp(
 			client.ID, client.Name, "(32) 98888-2222", "2026-08-12", "2026-08-13",
-			"Pendência", "", PriorityMedium, "", PhoneChangeUpdate, ClientResolutionExisting,
+			"Pendência", "", PriorityMedium, "", PhoneChangeUpdate, ClientResolutionExisting, "", "",
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -324,7 +352,7 @@ func TestSelectedClientPhoneResolution(t *testing.T) {
 		}
 		followUpID, err := store.createFollowUp(
 			client.ID, client.Name, "(32) 98888-2222", "2026-08-12", "2026-08-13",
-			"Pendência", "", PriorityMedium, "", PhoneChangeNewClient, ClientResolutionExisting,
+			"Pendência", "", PriorityMedium, "", PhoneChangeNewClient, ClientResolutionExisting, "", "",
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -343,7 +371,7 @@ func TestCreateFollowUpPreservesHomonymousClientIdentity(t *testing.T) {
 
 	firstFollowUpID, err := store.createFollowUp(
 		0, "Ana Silva", "(32) 99999-1111", "2026-08-12", "2026-08-13",
-		"Pendência da primeira Ana", "", PriorityMedium, "", "", ClientResolutionNew,
+		"Pendência da primeira Ana", "", PriorityMedium, "", "", ClientResolutionNew, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +380,7 @@ func TestCreateFollowUpPreservesHomonymousClientIdentity(t *testing.T) {
 
 	secondFollowUpID, err := store.createFollowUp(
 		0, "Ana Silva", "(32) 98888-2222", "2026-08-12", "2026-08-14",
-		"Pendência da segunda Ana", "", PriorityMedium, "", "", ClientResolutionNewHomonym,
+		"Pendência da segunda Ana", "", PriorityMedium, "", "", ClientResolutionNewHomonym, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +400,7 @@ func TestCreateFollowUpPreservesHomonymousClientIdentity(t *testing.T) {
 
 	reusedFollowUpID, err := store.createFollowUp(
 		firstClientID, "Ana Silva", firstClient.Contact, "2026-08-12", "2026-08-15",
-		"Nova pendência da primeira Ana", "", PriorityHigh, "", "", ClientResolutionExisting,
+		"Nova pendência da primeira Ana", "", PriorityHigh, "", "", ClientResolutionExisting, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -390,13 +418,207 @@ func TestCreateFollowUpPreservesHomonymousClientIdentity(t *testing.T) {
 	}
 }
 
+func TestDuplicatePhoneDetectionRequiresLegitimateToken(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	existing, err := store.createClient("Carlos Silva", "(32) 99999-5555")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Tentativa de criar novo cliente com mesmo telefone sem decisão e sem token
+	_, err = store.createFollowUp(
+		0, "Marcos Souza", "(32) 99999-5555", "2026-08-12", "2026-08-13",
+		"Retorno", "", PriorityMedium, "", "", ClientResolutionNew, "", "",
+	)
+	var duplicateErr *clientDuplicatePhoneRequiredError
+	if !errors.As(err, &duplicateErr) {
+		t.Fatalf("expected clientDuplicatePhoneRequiredError, got: %v", err)
+	}
+	if len(duplicateErr.ExistingClients) != 1 || duplicateErr.ExistingClients[0].ID != existing.ID {
+		t.Fatalf("conflicts = %#v, want client %d", duplicateErr.ExistingClients, existing.ID)
+	}
+	if duplicateErr.Token == "" {
+		t.Fatal("token should not be empty")
+	}
+
+	// Tentativa com allow mas token forjado/inválido
+	_, err = store.createFollowUp(
+		0, "Marcos Souza", "(32) 99999-5555", "2026-08-12", "2026-08-13",
+		"Retorno", "", PriorityMedium, "", "", ClientResolutionNew, "allow", "token_forjado_invalido",
+	)
+	if !errors.As(err, &duplicateErr) {
+		t.Fatalf("expected failure with forged token, got: %v", err)
+	}
+
+	// Tentativa com allow e token legítimo
+	followUpID, err := store.createFollowUp(
+		0, "Marcos Souza", "(32) 99999-5555", "2026-08-12", "2026-08-13",
+		"Retorno confirmado", "", PriorityMedium, "", "", ClientResolutionNew, "allow", duplicateErr.Token,
+	)
+	if err != nil {
+		t.Fatalf("creation with legitimate token failed: %v", err)
+	}
+
+	newClientID := followUpClientID(t, store.db, followUpID)
+	if newClientID == existing.ID {
+		t.Fatalf("expected new client ID, got existing %d", existing.ID)
+	}
+	assertClientPhone(t, store, existing.ID, "(32) 99999-5555")
+	assertClientPhone(t, store, newClientID, "(32) 99999-5555")
+}
+
+func TestDuplicatePhoneWithMultipleExistingClients(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	c1, err := store.createClient("Cliente Um", "(32) 98888-0000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2 := insertLegacyClient(t, store, "Cliente Dois", "(32) 98888-0000")
+
+	matches, err := store.findClientsByPhone("(32) 98888-0000", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("findClientsByPhone returned %d clients, want 2", len(matches))
+	}
+	if matches[0].ID != c1.ID || matches[1].ID != c2.ID {
+		t.Fatalf("conflicts = %#v, want [%d, %d]", matches, c1.ID, c2.ID)
+	}
+}
+
+func TestUpdateClientRequiresDuplicatePhoneConfirmation(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	c1, err := store.createClient("Cliente Um", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := store.createClient("Cliente Dois", "(32) 99999-2222")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.updateClient(c2.ID, c2.Name, c1.Contact, ClientPhoneChangeConfirmation, "", "")
+	var duplicateErr *clientEditDuplicatePhoneRequiredError
+	if !errors.As(err, &duplicateErr) {
+		t.Fatalf("expected clientEditDuplicatePhoneRequiredError, got: %v", err)
+	}
+	if len(duplicateErr.ExistingClients) != 1 || duplicateErr.ExistingClients[0].ID != c1.ID {
+		t.Fatalf("conflicts = %#v, want client %d", duplicateErr.ExistingClients, c1.ID)
+	}
+
+	if err := store.updateClient(c2.ID, c2.Name, c1.Contact, ClientPhoneChangeConfirmation, "allow", duplicateErr.Token); err != nil {
+		t.Fatalf("updateClient with legitimate token failed: %v", err)
+	}
+	assertClientPhone(t, store, c1.ID, "(32) 99999-1111")
+	assertClientPhone(t, store, c2.ID, "(32) 99999-1111")
+}
+
+func TestPhoneConfirmationTokenIsUnforgeableAcrossStores(t *testing.T) {
+	store1, _, _ := newTestStore(t)
+	store2, _, _ := newTestStore(t)
+
+	c1, _ := store1.createClient("Cliente Um", "(32) 99999-1111")
+	conflicts := []Client{c1}
+
+	token1 := store1.phoneConfirmationToken("(32) 99999-1111", 0, conflicts)
+	token2 := store2.phoneConfirmationToken("(32) 99999-1111", 0, conflicts)
+
+	if token1 == token2 {
+		t.Fatalf("tokens generated by different stores must differ due to distinct server secrets, got identical %q", token1)
+	}
+}
+
+func TestExistingClientWithDuplicatePhoneRequiresBothConfirmations(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	cA, err := store.createClient("Cliente A", "(32) 99999-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cB, err := store.createClient("Cliente B", "(32) 99999-2222")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Tenta criar pendência para Cliente A com telefone alterado sem phone_change_action -> exige alteração PRIMEIRO
+	_, err = store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
+	)
+	var changeErr *clientPhoneChangeRequiredError
+	if !errors.As(err, &changeErr) {
+		t.Fatalf("expected clientPhoneChangeRequiredError first, got: %v", err)
+	}
+
+	// 2. Com PhoneChangeUpdate mas sem decisão de duplicidade -> exige confirmação de duplicidade no destino cA.ID
+	_, err = store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência", "", PriorityMedium, "", PhoneChangeUpdate, ClientResolutionExisting, "", "",
+	)
+	var dupErrUpdate *clientDuplicatePhoneRequiredError
+	if !errors.As(err, &dupErrUpdate) {
+		t.Fatalf("expected clientDuplicatePhoneRequiredError for update, got: %v", err)
+	}
+
+	// 3. O token emitido para update (targetID = cA.ID) não é aceito para PhoneChangeNewClient (targetID = 0)
+	_, err = store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência", "", PriorityMedium, "", PhoneChangeNewClient, ClientResolutionExisting, "allow", dupErrUpdate.Token,
+	)
+	var dupErrNew *clientDuplicatePhoneRequiredError
+	if !errors.As(err, &dupErrNew) {
+		t.Fatalf("expected failure when reusing update token for new_client, got: %v", err)
+	}
+	if dupErrNew.Token == dupErrUpdate.Token {
+		t.Fatalf("tokens for update and new_client should differ, got identical %q", dupErrNew.Token)
+	}
+
+	// 4. Com PhoneChangeNewClient e token legítimo de new_client -> cria novo cadastro
+	followUpNewID, err := store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência novo cadastro", "", PriorityMedium, "", PhoneChangeNewClient, ClientResolutionExisting, "allow", dupErrNew.Token,
+	)
+	if err != nil {
+		t.Fatalf("createFollowUp with new_client and legit token failed: %v", err)
+	}
+	newClientID := followUpClientID(t, store.db, followUpNewID)
+	if newClientID == cA.ID || newClientID == cB.ID {
+		t.Fatalf("new client expected, got %d", newClientID)
+	}
+	// 5. Tentativa com PhoneChangeUpdate: como a base agora possui cB e newClientID com este telefone, o token anterior é invalidado e um novo token com os 2 conflitos é exigido
+	_, err = store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência update", "", PriorityMedium, "", PhoneChangeUpdate, ClientResolutionExisting, "allow", dupErrUpdate.Token,
+	)
+	var dupErrUpdatedBase *clientDuplicatePhoneRequiredError
+	if !errors.As(err, &dupErrUpdatedBase) {
+		t.Fatalf("expected clientDuplicatePhoneRequiredError after base changed, got: %v", err)
+	}
+	if len(dupErrUpdatedBase.ExistingClients) != 2 {
+		t.Fatalf("expected 2 conflicts, got: %#v", dupErrUpdatedBase.ExistingClients)
+	}
+
+	// Com o token atualizado para o conjunto de 2 conflitos -> sucesso no update de cA
+	followUpUpdateID, err := store.createFollowUp(
+		cA.ID, cA.Name, cB.Contact, "2026-08-12", "2026-08-13",
+		"Pendência update", "", PriorityMedium, "", PhoneChangeUpdate, ClientResolutionExisting, "allow", dupErrUpdatedBase.Token,
+	)
+	if err != nil {
+		t.Fatalf("createFollowUp with update and updated token failed: %v", err)
+	}
+	if followUpClientID(t, store.db, followUpUpdateID) != cA.ID {
+		t.Fatalf("expected follow-up on cA (%d), got %d", cA.ID, followUpClientID(t, store.db, followUpUpdateID))
+	}
+	assertClientPhone(t, store, cA.ID, "(32) 99999-2222")
+}
+
 func TestFollowUpStateTransitionsAndTimestamps(t *testing.T) {
 	store, _, fixedNow := newTestStore(t)
 	client, err := store.createClient("Cliente", "(32) 99999-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Pendência", "", PriorityMedium, "", "", ClientResolutionExisting)
+	id, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +662,7 @@ func TestOnlyPendingFollowUpsCanBeEditedWithoutChangingClient(t *testing.T) {
 	}
 	id, err := store.createFollowUp(
 		client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-		"Descrição inicial", "Equipe A", PriorityMedium, "Nota inicial", "", ClientResolutionExisting,
+		"Descrição inicial", "Equipe A", PriorityMedium, "Nota inicial", "", ClientResolutionExisting, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -486,14 +708,14 @@ func TestDeletePendingFollowUpPreservesClientsWithAnyHistory(t *testing.T) {
 			}
 			deleteID, err := store.createFollowUp(
 				client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-				"Excluir", "", PriorityMedium, "", "", ClientResolutionExisting,
+				"Excluir", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 			)
 			if err != nil {
 				t.Fatal(err)
 			}
 			remainingID, err := store.createFollowUp(
 				client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-14",
-				"Preservar", "", PriorityMedium, "", "", ClientResolutionExisting,
+				"Preservar", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -531,7 +753,7 @@ func TestDeleteOnlyPendingFollowUpAlsoDeletesOrphanClient(t *testing.T) {
 	}
 	id, err := store.createFollowUp(
 		client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-		"Única pendência", "", PriorityMedium, "", "", ClientResolutionExisting,
+		"Única pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -554,7 +776,7 @@ func TestCompletedAndArchivedFollowUpsCannotBeDeleted(t *testing.T) {
 			}
 			id, err := store.createFollowUp(
 				client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-				"Registro protegido", "", PriorityMedium, "", "", ClientResolutionExisting,
+				"Registro protegido", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -591,7 +813,7 @@ func TestOperationalOrdering(t *testing.T) {
 		{due: "2026-08-13", priority: PriorityLow, desc: "near"},
 	}
 	for _, test := range tests {
-		if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-01", test.due, test.desc, "", test.priority, "", "", ClientResolutionExisting); err != nil {
+		if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-01", test.due, test.desc, "", test.priority, "", "", ClientResolutionExisting, "", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -697,4 +919,84 @@ func insertLegacyClient(t *testing.T, store *Store, name, contact string) Client
 		t.Fatal(err)
 	}
 	return Client{ID: id, Name: name, Contact: contact, CreatedAt: now, UpdatedAt: now}
+}
+
+func TestDueDateCannotBeBeforeStartDate(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente Teste", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Tentativa de criar pendência com due_date anterior a start_date
+	_, err = store.createFollowUp(
+		client.ID, client.Name, client.Contact,
+		"2026-08-15", "2026-08-10",
+		"Descrição válida", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
+	)
+	if err == nil || !strings.Contains(err.Error(), "a data limite não pode ser anterior à data de início") {
+		t.Fatalf("expected error for due_date before start_date in createFollowUp, got: %v", err)
+	}
+
+	// Criar pendência válida
+	id, err := store.createFollowUp(
+		client.ID, client.Name, client.Contact,
+		"2026-08-10", "2026-08-15",
+		"Descrição válida", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
+	)
+	if err != nil {
+		t.Fatalf("createFollowUp failed: %v", err)
+	}
+
+	// Tentativa de atualizar pendência com due_date anterior a start_date
+	err = store.updatePendingFollowUp(id, "2026-08-20", "2026-08-18", "Descrição atualizada", "", PriorityHigh, "")
+	if err == nil || !strings.Contains(err.Error(), "a data limite não pode ser anterior à data de início") {
+		t.Fatalf("expected error for due_date before start_date in updatePendingFollowUp, got: %v", err)
+	}
+
+	// Atualização válida
+	err = store.updatePendingFollowUp(id, "2026-08-10", "2026-08-20", "Descrição atualizada", "", PriorityHigh, "")
+	if err != nil {
+		t.Fatalf("updatePendingFollowUp failed: %v", err)
+	}
+}
+
+func TestReportFollowUpsAccentAndCaseInsensitive(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	c1, err := store.createClient("João Valença", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.createFollowUp(
+		c1.ID, c1.Name, c1.Contact,
+		"2026-08-10", "2026-08-15",
+		"Exame cardiológico", "Márcio Silva", PriorityHigh, "", "", ClientResolutionExisting, "", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Busca por "joao" (sem acento)
+	results, err := store.reportFollowUps(ReportFilters{Client: "joao"}, "2026-08-10")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("expected 1 result for 'joao', got %d (err: %v)", len(results), err)
+	}
+
+	// Busca por "valenca" (sem cedilha)
+	results, err = store.reportFollowUps(ReportFilters{Client: "valenca"}, "2026-08-10")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("expected 1 result for 'valenca', got %d (err: %v)", len(results), err)
+	}
+
+	// Busca por encaminhamento "marcio" (sem acento)
+	results, err = store.reportFollowUps(ReportFilters{ForwardTo: "marcio"}, "2026-08-10")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("expected 1 result for 'marcio', got %d (err: %v)", len(results), err)
+	}
+
+	// Busca por encaminhamento "MÁRCIO"
+	results, err = store.reportFollowUps(ReportFilters{ForwardTo: "MÁRCIO"}, "2026-08-10")
+	if err != nil || len(results) != 1 {
+		t.Fatalf("expected 1 result for 'MÁRCIO', got %d (err: %v)", len(results), err)
+	}
 }

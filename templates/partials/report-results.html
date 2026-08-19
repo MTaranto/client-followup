@@ -8,7 +8,19 @@
         <thead><tr><th>Cliente</th><th>Descrição</th><th>Encaminhar para</th><th>Prazo</th><th>Prioridade</th><th>Status</th></tr></thead>
         <tbody>
         {{range .Results}}
-            <tr><td>{{.ClientName}}</td><td>{{.Description}}</td><td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td><td>{{formatDate .DueDate}}</td><td>{{priorityLabel .Priority}}</td><td>{{statusLabel .Status}}</td></tr>
+            <tr>
+                <td data-label="Cliente">{{.ClientName}}</td>
+                <td data-label="Descrição">
+                    <div class="desc-with-notes">
+                        <strong>{{.Description}}</strong>
+                        {{if .Notes}}<small class="followup-notes">{{.Notes}}</small>{{end}}
+                    </div>
+                </td>
+                <td data-label="Encaminhar para">{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
+                <td data-label="Prazo">{{formatDate .DueDate}}</td>
+                <td data-label="Prioridade"><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
+                <td data-label="Status"><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
+            </tr>
         {{else}}
             <tr><td colspan="6" class="empty-state">Nenhum registro encontrado com estes filtros.</td></tr>
         {{end}}

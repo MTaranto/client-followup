@@ -15,7 +15,7 @@ func TestDashboardEscapesUserContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", `<img src=x onerror=alert("description")>`, "", PriorityMedium, "", "", ClientResolutionExisting); err != nil {
+	if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", `<img src=x onerror=alert("description")>`, "", PriorityMedium, "", "", ClientResolutionExisting, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	app, err := newApplication(store, mustLocation(t))
@@ -58,8 +58,8 @@ func TestFollowUpHTTPWorkflow(t *testing.T) {
 		"notes":             {"Administrativo"},
 	}
 	response := performRequest(handler, http.MethodPost, "/followups", form)
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("HX-Trigger"), "followupSaved") {
-		t.Fatalf("create response = %d, trigger %q, body %s", response.Code, response.Header().Get("HX-Trigger"), response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("create response = %d, HX-Refresh %q, body %s", response.Code, response.Header().Get("HX-Refresh"), response.Body.String())
 	}
 
 	var followUpID, clientID int64
@@ -72,12 +72,18 @@ func TestFollowUpHTTPWorkflow(t *testing.T) {
 	assertResponseContains(t, response, "Vence amanhã", "highlight="+strconv.FormatInt(followUpID, 10))
 
 	response = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(followUpID, 10)+"/complete", nil)
-	assertResponseContains(t, response, "finalizada")
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh on complete, got %d (header %q)", response.Code, response.Header().Get("HX-Refresh"))
+	}
 	response = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(followUpID, 10)+"/reopen", nil)
-	assertResponseContains(t, response, "reaberta")
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh on reopen, got %d (header %q)", response.Code, response.Header().Get("HX-Refresh"))
+	}
 	performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(followUpID, 10)+"/complete", nil)
 	response = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(followUpID, 10)+"/archive", nil)
-	assertResponseContains(t, response, "arquivada")
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh on archive, got %d (header %q)", response.Code, response.Header().Get("HX-Refresh"))
+	}
 
 	response = performRequest(handler, http.MethodGet, "/dashboard", nil)
 	if strings.Contains(response.Body.String(), "Confirmar retorno") {
@@ -120,7 +126,7 @@ func TestDashboardClientLookupDoesNotTargetFollowUpTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-14", "Pendência preservada", "", PriorityMedium, "", "", ClientResolutionExisting); err != nil {
+	if _, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-14", "Pendência preservada", "", PriorityMedium, "", "", ClientResolutionExisting, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	app, err := newApplication(store, mustLocation(t))
@@ -182,7 +188,7 @@ func TestFollowUpFormCanBeOpenedFromClientOrTypedName(t *testing.T) {
 		response,
 		`name="client_name" value="Juliana Carvalho"`,
 		`name="contact" value=""`,
-		`type="date" name="due_date"`,
+		`name="due_date"`,
 		`<fieldset id="followup-fields" class="followup-fields full-width" disabled>`,
 		`id="followup-save" type="submit" class="button primary" disabled>`,
 	)
@@ -220,7 +226,7 @@ func TestClientNameEndpointsRejectDigitsAndAmbiguousCreation(t *testing.T) {
 	form := followUpFormValues(Client{}, "(32) 98888-2222")
 	form.Set("client_name", "JOAO COSTA")
 	response = performRequest(handler, http.MethodPost, "/followups", form)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "escolha uma cliente existente") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "escolha um cliente existente") {
 		t.Fatalf("ambiguous creation response = %d, body = %s", response.Code, response.Body.String())
 	}
 	assertTableCount(t, store.db, "clients", 1)
@@ -393,7 +399,7 @@ func TestFollowUpRejectsInvalidSelectedClientIdentity(t *testing.T) {
 	form = followUpFormValues(client, client.Contact)
 	form.Set("client_id", "999999")
 	response = performRequest(app.routes(), http.MethodPost, "/followups", form)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "não foi encontrada") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "não foi encontrado") {
 		t.Fatalf("missing identity response = %d, body = %s", response.Code, response.Body.String())
 	}
 	assertTableCount(t, store.db, "clients", 1)
@@ -478,7 +484,7 @@ func TestFollowUpEditAndDeleteRoutesEnforcePendingStatus(t *testing.T) {
 	}
 	id, err := store.createFollowUp(
 		client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-		"Descrição inicial", "Equipe A", PriorityMedium, "Nota", "", ClientResolutionExisting,
+		"Descrição inicial", "Equipe A", PriorityMedium, "Nota", "", ClientResolutionExisting, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -543,7 +549,7 @@ func TestDeletePendingRouteDeletesOrphanClient(t *testing.T) {
 	}
 	id, err := store.createFollowUp(
 		client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13",
-		"Excluir", "", PriorityMedium, "", "", ClientResolutionExisting,
+		"Excluir", "", PriorityMedium, "", "", ClientResolutionExisting, "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -553,8 +559,8 @@ func TestDeletePendingRouteDeletesOrphanClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := performRequest(app.routes(), http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/delete", nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("HX-Trigger"), "followupsChanged") {
-		t.Fatalf("delete response = %d, trigger %q, body = %s", response.Code, response.Header().Get("HX-Trigger"), response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("delete response = %d, HX-Refresh %q, body = %s", response.Code, response.Header().Get("HX-Refresh"), response.Body.String())
 	}
 	assertTableCount(t, store.db, "clients", 0)
 	assertTableCount(t, store.db, "followups", 0)
@@ -626,4 +632,568 @@ func TestHealth(t *testing.T) {
 	if response.Code != http.StatusOK || response.Body.String() != "ok\n" {
 		t.Fatalf("health response = %d %q", response.Code, response.Body.String())
 	}
+}
+
+func TestDashboardHeaderAndSearchPlaceholder(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(app.routes(), http.MethodGet, "/", nil)
+	assertResponseContains(t, response, "Acompanhamento", "Pendências de clientes", `placeholder="Digite o nome do cliente"`)
+}
+
+func TestFollowUpActionsOrderAndTerminology(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Carlos Santos", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	followUpID, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Retorno agendado", "", PriorityMedium, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	checkOrder := func(body, contextName string) {
+		actionsIdx := strings.Index(body, `class="actions`)
+		if actionsIdx == -1 {
+			t.Fatalf("[%s] actions container not found in body", contextName)
+		}
+		actionsBlock := body[actionsIdx:]
+		finalizeIdx := strings.Index(actionsBlock, "Finalizar")
+		editIdx := strings.Index(actionsBlock, ">Editar</button>")
+		deleteIdx := strings.Index(actionsBlock, "Excluir")
+		if finalizeIdx == -1 || editIdx == -1 || deleteIdx == -1 {
+			t.Fatalf("[%s] actions not found in actions block: %s", contextName, actionsBlock)
+		}
+		if !(finalizeIdx < editIdx && editIdx < deleteIdx) {
+			t.Fatalf("[%s] expected order Finalizar -> Editar -> Excluir, got indices %d, %d, %d", contextName, finalizeIdx, editIdx, deleteIdx)
+		}
+	}
+
+	dashboardResp := performRequest(handler, http.MethodGet, "/dashboard", nil)
+	checkOrder(dashboardResp.Body.String(), "dashboard")
+
+	clientResp := performRequest(handler, http.MethodGet, "/clients/"+strconv.FormatInt(client.ID, 10), nil)
+	checkOrder(clientResp.Body.String(), "client-detail")
+	assertResponseContains(t, clientResp, "Ficha do cliente", "Editar cliente")
+	_ = followUpID
+}
+
+func TestClientDetailNotesSemanticPrefix(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Mariana Ribeiro", "(32) 99999-0002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Checar exames", "", PriorityHigh, "Retorno na sexta-feira", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(app.routes(), http.MethodGet, "/clients/"+strconv.FormatInt(client.ID, 10), nil)
+	assertResponseContains(t, response, `<small class="followup-notes">Retorno na sexta-feira</small>`)
+}
+
+func TestDuplicatePhoneHTTPWorkflow(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	existing, err := store.createClient("Cliente Um", "(32) 99999-8888")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	// Tentativa sem confirmação
+	form := url.Values{
+		"client_name":       {"Cliente Dois"},
+		"client_resolution": {ClientResolutionNew},
+		"contact":           {existing.Contact},
+		"start_date":        {"2026-08-12"},
+		"due_date":          {"2026-08-13"},
+		"priority":          {PriorityHigh},
+		"description":       {"Retorno com duplicidade"},
+	}
+	response := performRequest(handler, http.MethodPost, "/followups", form)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict, got %d", response.Code)
+	}
+	assertBodyContains(t, response.Body.String(), "Telefone já utilizado", "Cliente Um", "data-phone-duplicate-action")
+
+	// GET para verificação prévia de telefone
+	verifyResp := performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?contact=32999998888", nil)
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("verify status = %d", verifyResp.Code)
+	}
+	assertBodyContains(t, verifyResp.Body.String(), "Telefone já utilizado", "Cliente Um", "data-duplicate-token")
+
+	// Extrai token legítimo
+	body := verifyResp.Body.String()
+	tokenMarker := `data-duplicate-token="`
+	idx := strings.Index(body, tokenMarker)
+	if idx == -1 {
+		t.Fatalf("token marker not found in body: %s", body)
+	}
+	token := body[idx+len(tokenMarker):]
+	endIdx := strings.Index(token, `"`)
+	token = token[:endIdx]
+
+	// Tentativa com allow e token forjado
+	forgedForm := url.Values{
+		"client_name":              {"Cliente Dois"},
+		"client_resolution":        {ClientResolutionNew},
+		"contact":                  {existing.Contact},
+		"start_date":               {"2026-08-12"},
+		"due_date":                 {"2026-08-13"},
+		"priority":                 {PriorityHigh},
+		"description":              {"Retorno com token forjado"},
+		"duplicate_phone_decision": {"allow"},
+		"duplicate_phone_token":    {"token_forjado"},
+	}
+	response = performRequest(handler, http.MethodPost, "/followups", forgedForm)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict for forged token, got %d", response.Code)
+	}
+
+	// Tentativa com allow e token legítimo
+	legitForm := url.Values{
+		"client_name":              {"Cliente Dois"},
+		"client_resolution":        {ClientResolutionNew},
+		"contact":                  {existing.Contact},
+		"start_date":               {"2026-08-12"},
+		"due_date":                 {"2026-08-13"},
+		"priority":                 {PriorityHigh},
+		"description":              {"Retorno legítimo"},
+		"duplicate_phone_decision": {"allow"},
+		"duplicate_phone_token":    {token},
+	}
+	response = performRequest(handler, http.MethodPost, "/followups", legitForm)
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh, got %d (header: %q, body: %s)", response.Code, response.Header().Get("HX-Refresh"), response.Body.String())
+	}
+}
+
+func TestDeleteAndArchiveHTTPWorkflowWithTriggers(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	client, err := store.createClient("Cliente Único", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Para arquivar", "", PriorityMedium, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Finaliza -> HX-Refresh: true
+	completeResp := performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/complete", nil)
+	if completeResp.Code != http.StatusOK || completeResp.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected HX-Refresh on complete, got code %d header %q", completeResp.Code, completeResp.Header().Get("HX-Refresh"))
+	}
+	if strings.Contains(completeResp.Header().Get("HX-Trigger"), "followupsChanged") {
+		t.Fatalf("complete handler should not emit followupsChanged trigger: %s", completeResp.Header().Get("HX-Trigger"))
+	}
+
+	// Arquiva -> HX-Refresh: true
+	archiveResp := performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/archive", nil)
+	if archiveResp.Code != http.StatusOK || archiveResp.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected HX-Refresh on archive, got code %d header %q", archiveResp.Code, archiveResp.Header().Get("HX-Refresh"))
+	}
+	if strings.Contains(archiveResp.Header().Get("HX-Trigger"), "followupsChanged") {
+		t.Fatalf("archive handler should not emit followupsChanged trigger: %s", archiveResp.Header().Get("HX-Trigger"))
+	}
+
+	// Novo cliente órfão para exclusão -> HX-Refresh: true
+	clientOrphan, err := store.createClient("Cliente Órfão", "(32) 99999-0002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanFollowUpID, err := store.createFollowUp(clientOrphan.ID, clientOrphan.Name, clientOrphan.Contact, "2026-08-12", "2026-08-13", "Para excluir", "", PriorityMedium, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleteResp := performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(orphanFollowUpID, 10)+"/delete", nil)
+	if deleteResp.Code != http.StatusOK || deleteResp.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("delete status = %d, HX-Refresh = %q", deleteResp.Code, deleteResp.Header().Get("HX-Refresh"))
+	}
+	if strings.Contains(deleteResp.Header().Get("HX-Trigger"), "followupsChanged") {
+		t.Fatalf("delete handler should not emit followupsChanged trigger: %s", deleteResp.Header().Get("HX-Trigger"))
+	}
+}
+
+func TestReportsIncludeNotesInHTML(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente Relatório", "(32) 99999-0003")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-12", "2026-08-13", "Descrição do exame", "", PriorityHigh, "Observação importante do relatório", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performRequest(app.routes(), http.MethodGet, "/reports?status=PENDING", nil)
+	assertResponseContains(t, response, "Descrição do exame", "Observação importante do relatório")
+}
+
+func TestExistingClientDuplicatePhoneHTTPWorkflow(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	cA, _ := store.createClient("Cliente Alfa", "(32) 99999-1111")
+	cB, _ := store.createClient("Cliente Beta", "(32) 99999-2222")
+
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	// 1. Verificação prévia no estágio Telefone sem phone_change_action -> retorna confirmação de alteração PRIMEIRO
+	verifyResp := performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(cB.Contact), nil)
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("verify status = %d", verifyResp.Code)
+	}
+	assertBodyContains(t, verifyResp.Body.String(), "já possui cadastro com", "Atualizar telefone deste cliente", "Cadastrar outro cliente com este nome")
+
+	// 2. Com phone_change_action="update" -> agora retorna confirmação de duplicidade com token para cA.ID
+	verifyResp = performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(cB.Contact)+"&phone_change_action=update", nil)
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("verify update duplicate status = %d", verifyResp.Code)
+	}
+	assertBodyContains(t, verifyResp.Body.String(), "Telefone já utilizado", "Cliente Beta")
+	tokenUpdate := extractTokenFromBody(t, verifyResp.Body.String())
+
+	// 3. Com phone_change_action="update", allow e tokenUpdate -> Telefone totalmente resolvido (corpo VAZIO)
+	verifyResp = performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(cB.Contact)+"&phone_change_action=update&duplicate_phone_decision=allow&duplicate_phone_token="+tokenUpdate, nil)
+	if verifyResp.Code != http.StatusOK || strings.TrimSpace(verifyResp.Body.String()) != "" {
+		t.Fatalf("expected empty response for fully resolved phone, got: %s", verifyResp.Body.String())
+	}
+
+	// 4. Com phone_change_action="new_client" mas reutilizando tokenUpdate -> duplicidade não resolvida (token para new_client difere)
+	verifyResp = performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(cB.Contact)+"&phone_change_action=new_client&duplicate_phone_decision=allow&duplicate_phone_token="+tokenUpdate, nil)
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("verify new_client with update token status = %d", verifyResp.Code)
+	}
+	assertBodyContains(t, verifyResp.Body.String(), "Telefone já utilizado", "Cliente Beta")
+	tokenNew := extractTokenFromBody(t, verifyResp.Body.String())
+	if tokenNew == tokenUpdate {
+		t.Fatalf("token for new_client (%s) should differ from update token (%s)", tokenNew, tokenUpdate)
+	}
+
+	// 5. POST com token legítimo de update e phone_change_action="update" -> 200 OK e followupSaved
+	form := url.Values{
+		"client_id":                {strconv.FormatInt(cA.ID, 10)},
+		"client_name":              {cA.Name},
+		"client_resolution":        {ClientResolutionExisting},
+		"contact":                  {cB.Contact},
+		"start_date":               {"2026-08-12"},
+		"due_date":                 {"2026-08-13"},
+		"priority":                 {PriorityHigh},
+		"description":              {"Retorno com dupla confirmação"},
+		"phone_change_action":      {"update"},
+		"duplicate_phone_decision": {"allow"},
+		"duplicate_phone_token":    {tokenUpdate},
+	}
+	response := performRequest(handler, http.MethodPost, "/followups", form)
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh, got %d (header: %q, body: %s)", response.Code, response.Header().Get("HX-Refresh"), response.Body.String())
+	}
+}
+
+func TestExistingClientNonDuplicatePhoneHTTPWorkflow(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	cA, _ := store.createClient("Cliente Único", "(32) 99999-1111")
+
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	newPhone := "(32) 99999-3333"
+
+	// 1. Sem phone_change_action -> exige alteração de telefone
+	verifyResp := performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(newPhone), nil)
+	if verifyResp.Code != http.StatusOK {
+		t.Fatalf("verify status = %d", verifyResp.Code)
+	}
+	assertBodyContains(t, verifyResp.Body.String(), "já possui cadastro com", "Atualizar telefone deste cliente")
+
+	// 2. Com phone_change_action="update" e telefone não duplicado -> resolvido (retorna vazio)
+	verifyResp = performRequest(handler, http.MethodGet, "/clients/phone-change-confirmation?client_id="+strconv.FormatInt(cA.ID, 10)+"&client_name="+url.QueryEscape(cA.Name)+"&contact="+url.QueryEscape(newPhone)+"&phone_change_action=update", nil)
+	if verifyResp.Code != http.StatusOK || strings.TrimSpace(verifyResp.Body.String()) != "" {
+		t.Fatalf("expected empty response for non-duplicate updated phone, got: %s", verifyResp.Body.String())
+	}
+
+	// 3. POST final com phone_change_action="update" -> 200 OK e HX-Refresh: true
+	form := url.Values{
+		"client_id":           {strconv.FormatInt(cA.ID, 10)},
+		"client_name":         {cA.Name},
+		"client_resolution":   {ClientResolutionExisting},
+		"contact":             {newPhone},
+		"start_date":          {"2026-08-12"},
+		"due_date":            {"2026-08-13"},
+		"priority":            {PriorityHigh},
+		"description":         {"Retorno com telefone novo não duplicado"},
+		"phone_change_action": {"update"},
+	}
+	response := performRequest(handler, http.MethodPost, "/followups", form)
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected 200 OK with HX-Refresh, got %d (header: %q, body: %s)", response.Code, response.Header().Get("HX-Refresh"), response.Body.String())
+	}
+}
+
+func TestDueDateValidationHTTP(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente Datas", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	// Tentativa de POST /followups com due_date anterior a start_date -> 400 Bad Request
+	form := url.Values{
+		"client_id":         {strconv.FormatInt(client.ID, 10)},
+		"client_name":       {client.Name},
+		"client_resolution": {ClientResolutionExisting},
+		"contact":           {client.Contact},
+		"start_date":        {"2026-08-15"},
+		"due_date":          {"2026-08-10"},
+		"priority":          {PriorityHigh},
+		"description":       {"Retorno inválido"},
+	}
+	response := performRequest(handler, http.MethodPost, "/followups", form)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request, got %d", response.Code)
+	}
+	assertBodyContains(t, response.Body.String(), "a data limite não pode ser anterior à data de início")
+
+	// Criação válida para teste de edição
+	form.Set("due_date", "2026-08-20")
+	response = performRequest(handler, http.MethodPost, "/followups", form)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", response.Code)
+	}
+
+	followUps, err := store.clientFollowUps(client.ID)
+	if err != nil || len(followUps) != 1 {
+		t.Fatalf("expected 1 followup, got %d", len(followUps))
+	}
+	followUpID := followUps[0].ID
+
+	// Tentativa de POST /followups/{id}/edit com due_date anterior a start_date -> 400 Bad Request
+	editForm := url.Values{
+		"start_date":  {"2026-08-25"},
+		"due_date":    {"2026-08-20"},
+		"priority":    {PriorityHigh},
+		"description": {"Edição com data inválida"},
+	}
+	response = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(followUpID, 10)+"/edit", editForm)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on edit, got %d", response.Code)
+	}
+	assertBodyContains(t, response.Body.String(), "a data limite não pode ser anterior à data de início")
+}
+
+func TestDashboardContentFragmentAndNoNotes(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente Dashboard", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-10", "2026-08-15", "Pendência com nota", "", PriorityMedium, "Nota que não deve aparecer na tabela principal", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	// 1. GET / (dashboard completo)
+	respPage := performRequest(handler, http.MethodGet, "/", nil)
+	if respPage.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /, got %d", respPage.Code)
+	}
+	pageBody := respPage.Body.String()
+	if strings.Contains(pageBody, "followup-notes") || strings.Contains(pageBody, "Nota que não deve aparecer na tabela principal") {
+		t.Fatalf("dashboard table should not render notes (must stay compact): %s", pageBody)
+	}
+
+	// 2. GET /dashboard (fragmento)
+	respFragment := performRequest(handler, http.MethodGet, "/dashboard", nil)
+	if respFragment.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GET /dashboard, got %d", respFragment.Code)
+	}
+	fragBody := respFragment.Body.String()
+	if !strings.Contains(fragBody, `id="dashboard-content"`) {
+		t.Fatalf("fragment must contain #dashboard-content: %s", fragBody)
+	}
+}
+
+func TestFollowUpFormDateFieldsAndID(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	resp := performRequest(handler, http.MethodGet, "/followups/new", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /followups/new, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `id="followup-start-date"`) {
+		t.Fatalf("form must contain id=\"followup-start-date\": %s", body)
+	}
+	if !strings.Contains(body, `data-date-input`) {
+		t.Fatalf("form must contain data-date-input: %s", body)
+	}
+	if !strings.Contains(body, `name="start_date"`) || !strings.Contains(body, `name="due_date"`) {
+		t.Fatalf("form must contain hidden inputs with name start_date and due_date: %s", body)
+	}
+}
+
+func TestReportsDateFieldsAndTriggers(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	resp := performRequest(handler, http.MethodGet, "/reports", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /reports, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `data-date-input`) {
+		t.Fatalf("reports must use data-date-input: %s", body)
+	}
+	if !strings.Contains(body, `name="date_from"`) || !strings.Contains(body, `name="date_to"`) {
+		t.Fatalf("reports must contain hidden inputs date_from and date_to: %s", body)
+	}
+	if !strings.Contains(body, `from:[name=client]`) || !strings.Contains(body, `from:[name=forward_to]`) {
+		t.Fatalf("reports form must use targeted input triggers: %s", body)
+	}
+}
+
+func TestHXRefreshOnSuccessAndNoRefreshOnFailure(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	client, err := store.createClient("Cliente Refresh", "(32) 99999-0099")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.createFollowUp(client.ID, client.Name, client.Contact, "2026-08-10", "2026-08-15", "Pendência", "", PriorityMedium, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApplication(store, mustLocation(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.routes()
+
+	// 1. Sucesso no complete -> 200 OK com HX-Refresh: true
+	res := performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/complete", nil)
+	if res.Code != http.StatusOK || res.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("complete: expected 200 OK with HX-Refresh: true, got %d header %q", res.Code, res.Header().Get("HX-Refresh"))
+	}
+
+	// 2. Falha ao tentar complete novamente (transição inválida) -> 409 Conflict SEM HX-Refresh
+	resFail := performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/complete", nil)
+	if resFail.Code != http.StatusConflict || resFail.Header().Get("HX-Refresh") != "" {
+		t.Fatalf("complete failure: expected 409 Conflict without HX-Refresh, got %d header %q", resFail.Code, resFail.Header().Get("HX-Refresh"))
+	}
+
+	// 3. Sucesso no archive -> 200 OK com HX-Refresh: true
+	res = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/archive", nil)
+	if res.Code != http.StatusOK || res.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("archive: expected 200 OK with HX-Refresh: true, got %d header %q", res.Code, res.Header().Get("HX-Refresh"))
+	}
+
+	// 4. Falha ao tentar archive novamente -> 409 Conflict SEM HX-Refresh
+	resFail = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/archive", nil)
+	if resFail.Code != http.StatusConflict || resFail.Header().Get("HX-Refresh") != "" {
+		t.Fatalf("archive failure: expected 409 Conflict without HX-Refresh, got %d header %q", resFail.Code, resFail.Header().Get("HX-Refresh"))
+	}
+
+	// 5. Falha ao tentar delete em pendência arquivada -> 409 Conflict SEM HX-Refresh
+	resFail = performRequest(handler, http.MethodPost, "/followups/"+strconv.FormatInt(id, 10)+"/delete", nil)
+	if resFail.Code != http.StatusConflict || resFail.Header().Get("HX-Refresh") != "" {
+		t.Fatalf("delete failure: expected 409 Conflict without HX-Refresh, got %d header %q", resFail.Code, resFail.Header().Get("HX-Refresh"))
+	}
+
+	// 6. Sucesso em createFollowUp -> 200 OK com HX-Refresh: true
+	newForm := url.Values{
+		"client_name":       {"Cliente Teste Refresh"},
+		"client_resolution": {ClientResolutionNew},
+		"contact":           {"32999991234"},
+		"start_date":        {"2026-08-12"},
+		"due_date":          {"2026-08-13"},
+		"priority":          {PriorityHigh},
+		"description":       {"Teste refresh na criação"},
+	}
+	res = performRequest(handler, http.MethodPost, "/followups", newForm)
+	if res.Code != http.StatusOK || res.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("create: expected 200 OK with HX-Refresh: true, got %d header %q", res.Code, res.Header().Get("HX-Refresh"))
+	}
+
+	// 7. Falha em createFollowUp (data limite anterior à data de início) -> 400 Bad Request SEM HX-Refresh
+	invalidForm := url.Values{
+		"client_name":       {"Cliente Teste Falha"},
+		"client_resolution": {ClientResolutionNew},
+		"contact":           {"32999991235"},
+		"start_date":        {"2026-08-15"},
+		"due_date":          {"2026-08-10"},
+		"priority":          {PriorityHigh},
+		"description":       {"Teste falha sem refresh"},
+	}
+	resFail = performRequest(handler, http.MethodPost, "/followups", invalidForm)
+	if resFail.Code != http.StatusBadRequest || resFail.Header().Get("HX-Refresh") != "" {
+		t.Fatalf("create failure: expected 400 Bad Request without HX-Refresh, got %d header %q", resFail.Code, resFail.Header().Get("HX-Refresh"))
+	}
+}
+
+func extractTokenFromBody(t *testing.T, body string) string {
+	t.Helper()
+	marker := `data-duplicate-token="`
+	idx := strings.Index(body, marker)
+	if idx == -1 {
+		t.Fatalf("token marker not found in body: %s", body)
+	}
+	token := body[idx+len(marker):]
+	endIdx := strings.Index(token, `"`)
+	if endIdx == -1 {
+		t.Fatalf("closing quote for token not found: %s", token)
+	}
+	return token[:endIdx]
 }

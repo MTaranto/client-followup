@@ -1,6 +1,5 @@
 {{define "dashboard-metrics.html"}}
-<section id="dashboard-metrics" class="metrics" aria-label="Indicadores"
-    hx-get="/dashboard/metrics" hx-trigger="followupsChanged from:body" hx-swap="outerHTML">
+<section id="dashboard-metrics" class="metrics" aria-label="Indicadores">
     <button class="metric danger" hx-get="/dashboard?due=OVERDUE" hx-target="#dashboard-content" hx-swap="outerHTML">
         <strong>{{.Counts.Overdue}}</strong><span>Atrasadas</span>
     </button>

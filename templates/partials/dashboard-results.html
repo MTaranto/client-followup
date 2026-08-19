@@ -1,7 +1,5 @@
 {{define "dashboard-results.html"}}
-<div id="dashboard-results"
-    hx-get="/dashboard/results?{{.Filters.Values.Encode}}"
-    hx-trigger="followupsChanged from:body" hx-swap="outerHTML">
+<div id="dashboard-results">
     {{template "followup-table.html" .}}
 </div>
 {{end}}

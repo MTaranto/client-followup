@@ -1,9 +1,8 @@
 {{define "client-detail.html"}}
 <div class="modal-overlay" role="presentation">
-    <section class="modal-content extra-wide" role="dialog" aria-modal="true" aria-labelledby="client-detail-title"
-        hx-get="/clients/{{.Client.ID}}" hx-trigger="followupsChanged from:body" hx-target="#modal-container" hx-swap="innerHTML">
+    <section class="modal-content extra-wide" role="dialog" aria-modal="true" aria-labelledby="client-detail-title">
         <header class="modal-header">
-            <div><p class="eyebrow">Ficha da cliente</p><h2 id="client-detail-title">{{.Client.Name}}</h2></div>
+            <div><p class="eyebrow">Ficha do cliente</p><h2 id="client-detail-title">{{.Client.Name}}</h2></div>
             <button type="button" class="icon-button modal-close" aria-label="Fechar">×</button>
         </header>
         <section id="client-edit-region" class="client-summary no-print">
@@ -18,15 +17,20 @@
                 <tbody>
                 {{range .FollowUps}}
                     <tr id="followup-{{.ID}}" class="{{if eq $.HighlightID .ID}}highlighted{{end}} {{if eq .Alert.Kind "OVERDUE"}}overdue-row{{else if eq .Alert.Kind "TODAY"}}today-row{{else if eq .Alert.Kind "TOMORROW"}}tomorrow-row{{end}}">
-                        <td><strong>{{.Description}}</strong>{{if .Notes}}<small class="notes">{{.Notes}}</small>{{end}}</td>
-                        <td>{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
-                        <td>{{formatDate .DueDate}}{{if .Alert.Label}}<small class="deadline {{.Alert.Kind}}">{{.Alert.Label}}</small>{{end}}</td>
-                        <td><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
-                        <td><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
-                        <td class="actions">{{template "followup-actions.html" .}}</td>
+                        <td data-label="Descrição">
+                            <div class="desc-with-notes">
+                                <strong>{{.Description}}</strong>
+                                {{if .Notes}}<small class="followup-notes">{{.Notes}}</small>{{end}}
+                            </div>
+                        </td>
+                        <td data-label="Encaminhar para">{{if .ForwardTo}}{{.ForwardTo}}{{else}}—{{end}}</td>
+                        <td data-label="Prazo">{{formatDate .DueDate}}{{if .Alert.Label}}<small class="deadline {{.Alert.Kind}}">{{.Alert.Label}}</small>{{end}}</td>
+                        <td data-label="Prioridade"><span class="badge priority-{{.Priority}}">{{priorityLabel .Priority}}</span></td>
+                        <td data-label="Status"><span class="badge status-{{.Status}}">{{statusLabel .Status}}</span></td>
+                        <td class="actions" data-label="Ações">{{template "followup-actions.html" .}}</td>
                     </tr>
                 {{else}}
-                    <tr><td colspan="6" class="empty-state">Não há pendências operacionais para esta cliente.</td></tr>
+                    <tr><td colspan="6" class="empty-state">Não há pendências operacionais para este cliente.</td></tr>
                 {{end}}
                 </tbody>
             </table>
