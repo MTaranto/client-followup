@@ -24,6 +24,7 @@ done
 for required_file in \
     client-followup \
     open-when-ready.sh \
+    restore-backup.sh \
     uninstall.sh \
     client-followup.service \
     client-followup.desktop \
@@ -69,6 +70,10 @@ cp -R "$bundle_directory/static" "$app_directory/static"
 install -m 0755 \
     "$bundle_directory/open-when-ready.sh" \
     "$application_directory/open-when-ready.sh"
+
+install -m 0755 \
+    "$bundle_directory/restore-backup.sh" \
+    "$application_directory/restore-backup.sh"
 
 install -m 0755 \
     "$bundle_directory/uninstall.sh" \

@@ -61,6 +61,10 @@ install -m 0755 \
     "$project_directory/scripts/open-when-ready.sh" \
     "$bundle_directory/open-when-ready.sh"
 
+install -m 0755 \
+    "$project_directory/scripts/restore-backup.sh" \
+    "$bundle_directory/restore-backup.sh"
+
 install -m 0644 \
     "$project_directory/systemd/client-followup.service" \
     "$bundle_directory/client-followup.service"
@@ -76,6 +80,7 @@ install -m 0644 \
 sh -n "$bundle_directory/install.sh"
 sh -n "$bundle_directory/uninstall.sh"
 sh -n "$bundle_directory/open-when-ready.sh"
+sh -n "$bundle_directory/restore-backup.sh"
 
 if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$bundle_directory/client-followup.desktop"

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const backupRetention = 14
+const backupRetention = 3
 
 func (store *Store) createDailyBackup(directory string, today time.Time) (string, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {

@@ -16,6 +16,7 @@ rm -f "$icon_file"
 
 rm -rf "$application_directory/app"
 rm -f "$application_directory/open-when-ready.sh"
+rm -f "$application_directory/restore-backup.sh"
 rm -f "$application_directory/uninstall.sh"
 
 if command -v update-desktop-database >/dev/null 2>&1; then
