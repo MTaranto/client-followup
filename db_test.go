@@ -829,16 +829,26 @@ func TestOperationalOrdering(t *testing.T) {
 	}
 }
 
-func TestDailyBackupAndRetention(t *testing.T) {
+func TestDailyBaselineAndSingleRetention(t *testing.T) {
 	store, _, _ := newTestStore(t)
 	client, _ := store.createClient("Cliente preservada", "(32) 99999-0003")
 	backupDirectory := filepath.Join(t.TempDir(), "backups")
+	_ = os.MkdirAll(backupDirectory, 0o700)
+
+	for day := 1; day <= 5; day++ {
+		path := filepath.Join(backupDirectory, fmt.Sprintf("client-followup-2026-08-%02d.db", day))
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	today := time.Date(2026, time.August, 12, 0, 0, 0, 0, mustLocation(t))
-	backupPath, err := store.createDailyBackup(backupDirectory, today)
+	baselinePath, err := store.initializeBackups(backupDirectory, today)
 	if err != nil {
 		t.Fatal(err)
 	}
-	backupDB, err := sql.Open("sqlite3", backupPath)
+
+	backupDB, err := sql.Open("sqlite3", baselinePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,18 +858,141 @@ func TestDailyBackupAndRetention(t *testing.T) {
 		t.Fatalf("backup content = %q, %v", name, err)
 	}
 
-	for day := 1; day <= 16; day++ {
-		path := filepath.Join(backupDirectory, fmt.Sprintf("client-followup-2026-07-%02d.db", day))
-		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
-			t.Fatal(err)
+	entries, _ := os.ReadDir(backupDirectory)
+	var baselineCount int
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "client-followup-") && strings.HasSuffix(entry.Name(), ".db") {
+			baselineCount++
 		}
 	}
-	if err := removeOldBackups(backupDirectory, backupRetention); err != nil {
+	if baselineCount != 1 {
+		t.Fatalf("baseline count = %d, want 1", baselineCount)
+	}
+}
+
+func TestRecoverySnapshotsRotationOnMutations(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	backupDirectory := filepath.Join(t.TempDir(), "backups")
+	today := time.Date(2026, time.August, 12, 0, 0, 0, 0, mustLocation(t))
+	if _, err := store.initializeBackups(backupDirectory, today); err != nil {
 		t.Fatal(err)
 	}
-	entries, _ := os.ReadDir(backupDirectory)
-	if len(entries) != backupRetention {
-		t.Fatalf("backup count = %d, want %d", len(entries), backupRetention)
+
+	clientA, err := store.createClient("Cliente A", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f1ID, err := store.createFollowUp(clientA.ID, clientA.Name, clientA.Contact, "2026-08-12", "2026-08-13", "Pendência 1", "Equipe", PriorityHigh, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkFollowUpCount := func(snapshotFile string, wantCount int) {
+		t.Helper()
+		dbPath := filepath.Join(backupDirectory, snapshotFile)
+		snapDB, err := sql.Open("sqlite3", dbPath)
+		if err != nil {
+			t.Fatalf("abrir %s: %v", snapshotFile, err)
+		}
+		defer snapDB.Close()
+		var count int
+		if err := snapDB.QueryRow("SELECT COUNT(*) FROM followups").Scan(&count); err != nil {
+			t.Fatalf("contar followups em %s: %v", snapshotFile, err)
+		}
+		if count != wantCount {
+			t.Fatalf("%s followups count = %d, want %d", snapshotFile, count, wantCount)
+		}
+	}
+
+	checkFollowUpCount("recent-1.db", 0)
+
+	f2ID, err := store.createFollowUp(clientA.ID, clientA.Name, clientA.Contact, "2026-08-12", "2026-08-14", "Pendência 2", "Equipe", PriorityMedium, "", "", ClientResolutionExisting, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFollowUpCount("recent-1.db", 1)
+	checkFollowUpCount("recent-2.db", 0)
+
+	if err := store.transitionFollowUp(f1ID, StatusPending, StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	checkFollowUpCount("recent-1.db", 2)
+	checkFollowUpCount("recent-2.db", 1)
+	checkFollowUpCount("recent-3.db", 0)
+
+	if err := store.updatePendingFollowUp(f2ID, "2026-08-12", "2026-08-15", "Pendência 2 alterada", "Outro", PriorityLow, "Nota"); err != nil {
+		t.Fatal(err)
+	}
+	checkFollowUpCount("recent-1.db", 2)
+	checkFollowUpCount("recent-2.db", 2)
+	checkFollowUpCount("recent-3.db", 1)
+
+	if _, err := os.Stat(filepath.Join(backupDirectory, "recent-tmp.db")); !os.IsNotExist(err) {
+		t.Fatalf("recent-tmp.db não deveria existir após operações normais")
+	}
+}
+
+func TestFailedMutationDoesNotPromoteSnapshot(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	backupDirectory := filepath.Join(t.TempDir(), "backups")
+	today := time.Date(2026, time.August, 12, 0, 0, 0, 0, mustLocation(t))
+	if _, err := store.initializeBackups(backupDirectory, today); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := store.createClient("Cliente Inicial", "(32) 99999-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap1Before, err := os.ReadFile(filepath.Join(backupDirectory, "recent-1.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Provoca falha após prepareRecoverySnapshot (status válidos, mas ID inexistente)
+	err = store.transitionFollowUp(999999, StatusPending, StatusCompleted)
+	if !errors.Is(err, errInvalidTransition) {
+		t.Fatalf("esperava errInvalidTransition, obtido: %v", err)
+	}
+
+	snap1After, err := os.ReadFile(filepath.Join(backupDirectory, "recent-1.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(snap1Before) != string(snap1After) {
+		t.Fatalf("recent-1.db foi alterado em operação que falhou")
+	}
+	if _, err := os.Stat(filepath.Join(backupDirectory, "recent-2.db")); !os.IsNotExist(err) {
+		t.Fatalf("recent-2.db não deveria existir")
+	}
+	if _, err := os.Stat(filepath.Join(backupDirectory, "recent-tmp.db")); !os.IsNotExist(err) {
+		t.Fatalf("recent-tmp.db deveria ter sido descartado")
+	}
+}
+
+func TestPreRestorePreservedFromCleanDailyBaselines(t *testing.T) {
+	store, _, _ := newTestStore(t)
+	backupDirectory := filepath.Join(t.TempDir(), "backups")
+	_ = os.MkdirAll(backupDirectory, 0o700)
+
+	preRestorePath := filepath.Join(backupDirectory, "pre-restore.db")
+	if err := os.WriteFile(preRestorePath, []byte("pre-restore-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	today := time.Date(2026, time.August, 13, 0, 0, 0, 0, mustLocation(t))
+	if _, err := store.initializeBackups(backupDirectory, today); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(preRestorePath)
+	if err != nil {
+		t.Fatalf("pre-restore.db deveria existir: %v", err)
+	}
+	if string(content) != "pre-restore-content" {
+		t.Fatalf("conteúdo de pre-restore.db = %q", string(content))
 	}
 }
 

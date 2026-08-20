@@ -30,9 +30,9 @@ func main() {
 	}
 	defer store.Close()
 
-	backupPath, err := store.createDailyBackup(*backupDirectory, now())
+	backupPath, err := store.initializeBackups(*backupDirectory, now())
 	if err != nil {
-		log.Fatalf("proteger dados com backup diário: %v", err)
+		log.Fatalf("inicializar backups: %v", err)
 	}
 	log.Printf("backup diário disponível em %s", backupPath)
 
