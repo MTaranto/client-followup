@@ -56,7 +56,13 @@ The application listens locally on `127.0.0.1`, keeping the workflow and data un
 
 ## Linux distribution
 
-The validated distribution targets **Linux x86-64 / amd64** and is built as the compiled `client-followup-linux-amd64.tar.gz` bundle. End users do not need Go or the `sqlite3` CLI to run the application.
+The validated distribution targets **Linux x86-64 / amd64** and is provided as the compiled package:
+
+```text
+client-followup-linux-amd64.tar.gz
+```
+
+End users do not need Go or the `sqlite3` CLI to run the application.
 
 Expected runtime dependencies:
 
@@ -64,9 +70,27 @@ Expected runtime dependencies:
 - `curl`;
 - `xdg-open`.
 
+### Download
+
+The distributable version is available from the repository's **Releases** section:
+
+https://github.com/MTaranto/client-followup/releases
+
+For the first stable distribution, use release:
+
+```text
+v1.0.0
+```
+
+Download:
+
+```text
+client-followup-linux-amd64.tar.gz
+```
+
 ### Installation
 
-For a version published through GitHub Releases, download and extract the bundle, then run the installer from the extracted directory:
+After downloading the file, open a terminal in the directory where it was saved and run:
 
 ```bash
 tar -xzf client-followup-linux-amd64.tar.gz
@@ -74,17 +98,19 @@ cd client-followup-linux-amd64
 ./install.sh
 ```
 
-Installation is entirely user-level and **does not use `sudo`**. The application is added to the application menu as **Client Follow-up**.
+Installation is entirely user-level and **does not use `sudo`**.
+
+After installation, the application is available as **Client Follow-up** in the application menu.
 
 The `systemd --user` service starts on demand when the application is opened. It is not configured for session autostart.
 
-Application files are installed under:
+Executable application files are installed under:
 
 ```text
 ~/.local/share/client-followup/app/
 ```
 
-The database is stored separately from the replaceable application files:
+The database is stored separately from replaceable application files:
 
 ```text
 ~/.local/share/client-followup/data/client-followup.db
@@ -98,7 +124,7 @@ Backups and recovery points are stored under:
 
 ## Backup and recovery
 
-The mechanism uses complete SQLite snapshots, not incremental backups.
+The mechanism uses **complete SQLite snapshots**, not incremental backups.
 
 The normal recovery window keeps storage bounded:
 
@@ -106,17 +132,21 @@ The normal recovery window keeps storage bounded:
 - **up to 3 rotating recovery snapshots** — `recent-1.db`, `recent-2.db` and `recent-3.db`, preserving states from before the latest persisted changes;
 - **1 pre-restore protection** — `pre-restore.db`, created during a restore to preserve the database that was active immediately before restoration.
 
-`recent-1` is the state immediately before the latest persisted change, followed by `recent-2` and `recent-3`.
+`recent-1` represents the state immediately before the latest persisted change, followed by `recent-2` and `recent-3`.
 
-### Restoring a recovery point
+### Display available recovery points
 
-To display usage and the currently available recovery points:
+Run:
 
 ```bash
 ~/.local/share/client-followup/restore-backup.sh
 ```
 
-Restore examples:
+The command displays usage information and the currently available recovery points.
+
+### Restore a recovery point
+
+Examples:
 
 ```bash
 ~/.local/share/client-followup/restore-backup.sh recent-1
@@ -126,9 +156,19 @@ Restore examples:
 ~/.local/share/client-followup/restore-backup.sh 2026-08-20
 ```
 
-The script validates the selected point, stops the service, preserves the active database as `pre-restore.db`, restores the snapshot, removes SQLite WAL/SHM files, restarts the service and waits for the `/health` endpoint to respond.
+The script:
 
-After a successful restore, refresh the browser with `F5`. The state that existed immediately before restoration is also made available as `recent-1`, providing an immediate undo path for the restore itself.
+1. validates the selected recovery point;
+2. stops the service;
+3. preserves the active database as `pre-restore.db`;
+4. restores the selected snapshot;
+5. removes SQLite WAL/SHM files;
+6. restarts the service;
+7. waits for the `/health` endpoint to respond.
+
+After a successful restore, refresh the browser with `F5`.
+
+The state that was active immediately before restoration is also made available as `recent-1`, providing an immediate way to undo the restore itself.
 
 ## Uninstall
 
@@ -138,17 +178,39 @@ Run:
 ~/.local/share/client-followup/uninstall.sh
 ```
 
-Uninstall removes the service, launcher, icon and executable application files, while **preserving the database and backups** under:
+Uninstall removes:
+
+- the `systemd --user` service;
+- application-menu launcher;
+- application icon;
+- executable application files.
+
+The database and backups are **preserved** under:
 
 ```text
 ~/.local/share/client-followup/
 ```
 
+A future installation can therefore reuse the existing data.
+
 ## Quality
 
 The project includes automated tests for business rules and persistence, together with `go vet`, race-detector checks, JavaScript validation and GitHub Actions.
 
-The main workflows have also been manually validated in the browser, including client creation, search, duplicate-name resolution, phone flows, follow-up lifecycle operations, dashboard synchronization, reports, responsive layouts and printing. The Linux distribution has also been validated end to end for user-level installation, launcher startup, data persistence, Backup & Recovery and uninstall with data preservation.
+The main workflows have also been manually validated in the browser, including client creation, search, duplicate-name resolution, phone flows, follow-up lifecycle operations, dashboard synchronization, reports, responsive layouts and printing.
+
+The Linux distribution has also been validated for:
+
+- Linux amd64 bundle build;
+- user-level installation without `sudo`;
+- startup from the application menu;
+- on-demand service startup;
+- data persistence;
+- recovery-point rotation;
+- restore;
+- restore undo;
+- reinstall while preserving data;
+- uninstall while preserving the database and backups.
 
 ## S.C.A.L.E. Method
 
