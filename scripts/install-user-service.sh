@@ -1,31 +1,98 @@
 #!/bin/sh
 set -eu
 
-project_directory=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-application_directory=${XDG_DATA_HOME:-"$HOME/.local/share"}/client-followup
-service_directory=${XDG_CONFIG_HOME:-"$HOME/.config"}/systemd/user
-autostart_directory=${XDG_CONFIG_HOME:-"$HOME/.config"}/autostart
+bundle_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-command -v go >/dev/null 2>&1 || { echo "Go não está instalado." >&2; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo "curl não está instalado." >&2; exit 1; }
-command -v flock >/dev/null 2>&1 || { echo "flock não está instalado." >&2; exit 1; }
-command -v xdg-open >/dev/null 2>&1 || { echo "xdg-open não está instalado." >&2; exit 1; }
+application_directory="$HOME/.local/share/client-followup"
+app_directory="$application_directory/app"
+service_directory="$HOME/.config/systemd/user"
+desktop_directory="$HOME/.local/share/applications"
+icon_directory="$HOME/.local/share/icons/hicolor/512x512/apps"
 
-mkdir -p "$application_directory"
-install -d -m 0700 "$application_directory/data" "$application_directory/backups"
-mkdir -p "$application_directory/scripts" "$service_directory" "$autostart_directory"
+[ "$#" -eq 0 ] || {
+    echo "Uso: ./install.sh" >&2
+    exit 2
+}
 
-(cd "$project_directory" && go build -o "$application_directory/client-followup" .)
-rm -rf "$application_directory/templates" "$application_directory/static"
-cp -R "$project_directory/templates" "$application_directory/templates"
-cp -R "$project_directory/static" "$application_directory/static"
-install -m 0755 "$project_directory/scripts/open-when-ready.sh" "$application_directory/scripts/open-when-ready.sh"
-install -m 0644 "$project_directory/systemd/client-followup.service" "$service_directory/client-followup.service"
-install -m 0644 "$project_directory/autostart/client-followup.desktop" "$autostart_directory/client-followup.desktop"
+for command_name in systemctl curl xdg-open; do
+    command -v "$command_name" >/dev/null 2>&1 || {
+        echo "Dependência necessária não encontrada: $command_name" >&2
+        exit 1
+    }
+done
+
+for required_file in \
+    client-followup \
+    open-when-ready.sh \
+    uninstall.sh \
+    client-followup.service \
+    client-followup.desktop \
+    client-followup.png
+do
+    [ -f "$bundle_directory/$required_file" ] || {
+        echo "Bundle incompleto: $required_file não encontrado." >&2
+        exit 1
+    }
+done
+
+for required_directory in templates static; do
+    [ -d "$bundle_directory/$required_directory" ] || {
+        echo "Bundle incompleto: $required_directory/ não encontrado." >&2
+        exit 1
+    }
+done
+
+systemctl --user stop client-followup.service 2>/dev/null || true
+
+mkdir -p \
+    "$app_directory" \
+    "$application_directory/data" \
+    "$application_directory/backups" \
+    "$service_directory" \
+    "$desktop_directory" \
+    "$icon_directory"
+
+chmod 700 \
+    "$application_directory/data" \
+    "$application_directory/backups"
+
+rm -f "$app_directory/client-followup"
+rm -rf "$app_directory/templates" "$app_directory/static"
+
+install -m 0755 \
+    "$bundle_directory/client-followup" \
+    "$app_directory/client-followup"
+
+cp -R "$bundle_directory/templates" "$app_directory/templates"
+cp -R "$bundle_directory/static" "$app_directory/static"
+
+install -m 0755 \
+    "$bundle_directory/open-when-ready.sh" \
+    "$application_directory/open-when-ready.sh"
+
+install -m 0755 \
+    "$bundle_directory/uninstall.sh" \
+    "$application_directory/uninstall.sh"
+
+install -m 0644 \
+    "$bundle_directory/client-followup.service" \
+    "$service_directory/client-followup.service"
+
+install -m 0644 \
+    "$bundle_directory/client-followup.desktop" \
+    "$desktop_directory/client-followup.desktop"
+
+install -m 0644 \
+    "$bundle_directory/client-followup.png" \
+    "$icon_directory/client-followup.png"
 
 systemctl --user daemon-reload
-systemctl --user enable --now client-followup.service
 
-echo "Client Follow-up instalado. O serviço já está ativo e o painel abrirá nos próximos logins."
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$desktop_directory" 2>/dev/null || true
+fi
+
+echo "Client Follow-up instalado."
+echo "Abra \"Client Follow-up\" pelo menu de aplicativos."
 echo "Dados: $application_directory/data"
 echo "Backups: $application_directory/backups"
