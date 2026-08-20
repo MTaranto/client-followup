@@ -314,8 +314,8 @@ func (app *Application) updateFollowUp(w http.ResponseWriter, r *http.Request) {
 		app.renderError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("HX-Trigger", `{"followupsChanged":true,"closeModal":true}`)
-	app.renderSuccess(w, "Pendência atualizada com sucesso.")
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (app *Application) deleteFollowUp(w http.ResponseWriter, r *http.Request) {

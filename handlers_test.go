@@ -509,8 +509,13 @@ func TestFollowUpEditAndDeleteRoutesEnforcePendingStatus(t *testing.T) {
 		"forward_to":  {"Equipe B"},
 		"notes":       {"Nota atualizada"},
 	})
-	if response.Code != http.StatusOK {
-		t.Fatalf("pending edit status = %d, body = %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf(
+			"pending edit response = %d, HX-Refresh %q, body = %s",
+			response.Code,
+			response.Header().Get("HX-Refresh"),
+			response.Body.String(),
+		)
 	}
 	updated, err := store.getFollowUp(id)
 	if err != nil || updated.ClientID != client.ID || updated.Description != "Descrição atualizada" {

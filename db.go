@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -67,9 +68,11 @@ func (err *clientEditDuplicatePhoneRequiredError) Error() string {
 }
 
 type Store struct {
-	db          *sql.DB
-	now         func() time.Time
-	tokenSecret []byte
+	db              *sql.DB
+	now             func() time.Time
+	tokenSecret     []byte
+	backupDirectory string
+	recoveryMu      sync.Mutex
 }
 
 func (store *Store) phoneConfirmationToken(phone string, clientID int64, conflicts []Client) string {
@@ -181,18 +184,30 @@ func (store *Store) createClient(name, contact string) (Client, error) {
 		return Client{}, err
 	}
 
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return Client{}, err
+	}
+
 	now := store.now()
 	result, err := store.db.Exec(
 		"INSERT INTO clients (name, contact, created_at, updated_at) VALUES (?, ?, ?, ?)",
 		name, contact, now, now,
 	)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return Client{}, fmt.Errorf("cadastrar cliente: %w", err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return Client{}, fmt.Errorf("obter cliente cadastrada: %w", err)
 	}
+
+	store.promoteRecoverySnapshot(snapshot)
 	return Client{ID: id, Name: name, Contact: contact, CreatedAt: now, UpdatedAt: now}, nil
 }
 
@@ -316,14 +331,24 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 		return 0, errors.New("a prioridade é inválida")
 	}
 
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return 0, err
+	}
+
 	transaction, err := store.db.Begin()
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return 0, fmt.Errorf("iniciar cadastro: %w", err)
 	}
 	defer transaction.Rollback()
 
 	resolvedClientID, err := store.findOrCreateClient(transaction, clientID, clientName, contact, phoneChangeAction, clientResolution, duplicatePhoneDecision, duplicatePhoneToken)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return 0, err
 	}
 	now := store.now()
@@ -333,15 +358,20 @@ func (store *Store) createFollowUp(clientID int64, clientName, contact, startDat
 		resolvedClientID, startDate, dueDate, description, normalizeText(forwardTo), priority, StatusPending, normalizeText(notes), now, now,
 	)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return 0, fmt.Errorf("cadastrar pendência: %w", err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return 0, fmt.Errorf("obter pendência cadastrada: %w", err)
 	}
 	if err := transaction.Commit(); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return 0, fmt.Errorf("confirmar cadastro: %w", err)
 	}
+
+	store.promoteRecoverySnapshot(snapshot)
 	return id, nil
 }
 
@@ -354,8 +384,18 @@ func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmatio
 	if err != nil {
 		return err
 	}
+
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return err
+	}
+
 	existing, err := store.getClient(id)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("cliente não encontrado")
 		}
@@ -365,28 +405,46 @@ func (store *Store) updateClient(id int64, name, contact, phoneChangeConfirmatio
 	if currentPhoneErr != nil || currentPhone != contact {
 		conflicts, err := findClientsByPhoneQuery(store.db, contact, id)
 		if err != nil {
+			store.discardRecoverySnapshot(snapshot)
 			return fmt.Errorf("verificar duplicidade de telefone: %w", err)
 		}
 		if len(conflicts) > 0 {
 			expectedToken := store.phoneConfirmationToken(contact, id, conflicts)
 			if duplicatePhoneDecision != "allow" || duplicatePhoneToken != expectedToken {
+				store.discardRecoverySnapshot(snapshot)
 				return &clientEditDuplicatePhoneRequiredError{Client: existing, ExistingClients: conflicts, SubmittedPhone: contact, Token: expectedToken}
 			}
 		}
 		if phoneChangeConfirmation != ClientPhoneChangeConfirmation {
+			store.discardRecoverySnapshot(snapshot)
 			return &clientEditPhoneChangeRequiredError{Client: existing, SubmittedPhone: contact}
 		}
 	}
 	result, err := store.db.Exec("UPDATE clients SET name = ?, contact = ?, updated_at = ? WHERE id = ?", name, contact, store.now(), id)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return fmt.Errorf("atualizar cliente: %w", err)
 	}
-	return requireChangedRow(result, "cliente não encontrado")
+	if err := requireChangedRow(result, "cliente não encontrado"); err != nil {
+		store.discardRecoverySnapshot(snapshot)
+		return err
+	}
+
+	store.promoteRecoverySnapshot(snapshot)
+	return nil
 }
 
 func (store *Store) transitionFollowUp(id int64, fromStatus, toStatus string) error {
 	if !validStatus(fromStatus) || !validStatus(toStatus) {
 		return errInvalidTransition
+	}
+
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return err
 	}
 
 	now := store.now()
@@ -398,25 +456,33 @@ func (store *Store) transitionFollowUp(id int64, fromStatus, toStatus string) er
 		query = "UPDATE followups SET status = ?, completed_at = NULL, archived_at = NULL, updated_at = ? WHERE id = ? AND status = ?"
 		result, err := store.db.Exec(query, toStatus, now, id, fromStatus)
 		if err != nil {
+			store.discardRecoverySnapshot(snapshot)
 			return fmt.Errorf("reabrir pendência: %w", err)
 		}
 		if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+			store.discardRecoverySnapshot(snapshot)
 			return errInvalidTransition
 		}
+		store.promoteRecoverySnapshot(snapshot)
 		return nil
 	case fromStatus == StatusCompleted && toStatus == StatusArchived:
 		query = "UPDATE followups SET status = ?, archived_at = ?, updated_at = ? WHERE id = ? AND status = ?"
 	default:
+		store.discardRecoverySnapshot(snapshot)
 		return errInvalidTransition
 	}
 
 	result, err := store.db.Exec(query, toStatus, now, now, id, fromStatus)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return fmt.Errorf("atualizar status: %w", err)
 	}
 	if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return errInvalidTransition
 	}
+
+	store.promoteRecoverySnapshot(snapshot)
 	return nil
 }
 
@@ -450,23 +516,44 @@ func (store *Store) updatePendingFollowUp(id int64, startDate, dueDate, descript
 		return errors.New("a prioridade é inválida")
 	}
 
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return err
+	}
+
 	// Keeping the current status in the write predicate closes the race between
 	// opening the editor and another request completing or archiving the item.
 	result, err := store.db.Exec(`UPDATE followups SET start_date = ?, due_date = ?, description = ?,
 		forward_to = ?, priority = ?, notes = ?, updated_at = ? WHERE id = ? AND status = ?`,
 		startDate, dueDate, description, normalizeText(forwardTo), priority, normalizeText(notes), store.now(), id, StatusPending)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return fmt.Errorf("atualizar pendência: %w", err)
 	}
 	if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return errInvalidTransition
 	}
+
+	store.promoteRecoverySnapshot(snapshot)
 	return nil
 }
 
 func (store *Store) deletePendingFollowUp(id int64) (bool, error) {
+	store.recoveryMu.Lock()
+	defer store.recoveryMu.Unlock()
+
+	snapshot, err := store.prepareRecoverySnapshot()
+	if err != nil {
+		return false, err
+	}
+
 	transaction, err := store.db.Begin()
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return false, fmt.Errorf("iniciar exclusão: %w", err)
 	}
 	defer transaction.Rollback()
@@ -474,24 +561,29 @@ func (store *Store) deletePendingFollowUp(id int64) (bool, error) {
 	var clientID int64
 	var status string
 	if err := transaction.QueryRow("SELECT client_id, status FROM followups WHERE id = ?", id).Scan(&clientID, &status); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, errors.New("pendência não encontrada")
 		}
 		return false, fmt.Errorf("consultar pendência: %w", err)
 	}
 	if status != StatusPending {
+		store.discardRecoverySnapshot(snapshot)
 		return false, errInvalidTransition
 	}
 	result, err := transaction.Exec("DELETE FROM followups WHERE id = ? AND status = ?", id, StatusPending)
 	if err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return false, fmt.Errorf("excluir pendência: %w", err)
 	}
 	if err := requireChangedRow(result, errInvalidTransition.Error()); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return false, errInvalidTransition
 	}
 
 	var remaining int
 	if err := transaction.QueryRow("SELECT COUNT(*) FROM followups WHERE client_id = ?", clientID).Scan(&remaining); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return false, fmt.Errorf("verificar histórico da cliente: %w", err)
 	}
 	clientDeleted := remaining == 0
@@ -499,12 +591,16 @@ func (store *Store) deletePendingFollowUp(id int64) (bool, error) {
 		// The orphan check and both deletions share this transaction so a failure
 		// cannot leave a client without its only follow-up or delete one with history.
 		if _, err := transaction.Exec("DELETE FROM clients WHERE id = ?", clientID); err != nil {
+			store.discardRecoverySnapshot(snapshot)
 			return false, fmt.Errorf("excluir cliente sem pendências: %w", err)
 		}
 	}
 	if err := transaction.Commit(); err != nil {
+		store.discardRecoverySnapshot(snapshot)
 		return false, fmt.Errorf("confirmar exclusão: %w", err)
 	}
+
+	store.promoteRecoverySnapshot(snapshot)
 	return clientDeleted, nil
 }
 

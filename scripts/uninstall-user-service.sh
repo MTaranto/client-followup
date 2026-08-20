@@ -1,17 +1,28 @@
 #!/bin/sh
 set -eu
 
-application_directory=${XDG_DATA_HOME:-"$HOME/.local/share"}/client-followup
-service_directory=${XDG_CONFIG_HOME:-"$HOME/.config"}/systemd/user
-autostart_directory=${XDG_CONFIG_HOME:-"$HOME/.config"}/autostart
+application_directory="$HOME/.local/share/client-followup"
+service_file="$HOME/.config/systemd/user/client-followup.service"
+desktop_file="$HOME/.local/share/applications/client-followup.desktop"
+icon_file="$HOME/.local/share/icons/hicolor/512x512/apps/client-followup.png"
 
-systemctl --user disable --now client-followup.service 2>/dev/null || true
-rm -f "$service_directory/client-followup.service"
-rm -f "$autostart_directory/client-followup.desktop"
+systemctl --user stop client-followup.service 2>/dev/null || true
+
+rm -f "$service_file"
 systemctl --user daemon-reload
 
-rm -f "$application_directory/client-followup"
-rm -rf "$application_directory/templates" "$application_directory/static" "$application_directory/scripts"
+rm -f "$desktop_file"
+rm -f "$icon_file"
 
-echo "Serviço e aplicação removidos. Os diretórios data/ e backups/ foram preservados em:"
+rm -rf "$application_directory/app"
+rm -f "$application_directory/open-when-ready.sh"
+rm -f "$application_directory/restore-backup.sh"
+rm -f "$application_directory/uninstall.sh"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+fi
+
+echo "Client Follow-up removido."
+echo "Seus dados e backups foram preservados em:"
 echo "$application_directory"
