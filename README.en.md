@@ -20,7 +20,7 @@ It runs locally on Linux, with data persisted in SQLite and a web interface serv
 - record search and filtering by date range, client, forwarding destination, priority and status;
 - browser printing for PDF export;
 - responsive interface for desktop, tablet and mobile;
-- automatic local SQLite backups.
+- automatic local backups with rotating SQLite recovery points.
 
 Archived follow-ups leave the main operational workflow but remain available for historical consultation.
 
@@ -54,23 +54,101 @@ SQLite
 
 The application listens locally on `127.0.0.1`, keeping the workflow and data under the user's own control.
 
-## Installation
+## Linux distribution
 
-The final Linux distribution will be provided as a **compiled binary**, so end users will not need to install Go or the `sqlite3` utility to run the application.
+The validated distribution targets **Linux x86-64 / amd64** and is built as the compiled `client-followup-linux-amd64.tar.gz` bundle. End users do not need Go or the `sqlite3` CLI to run the application.
 
-The installation layer is currently being prepared and will be completed before final distribution. It is intended to provide:
+Expected runtime dependencies:
 
-- a Linux `.desktop` launcher with its own name and icon in the application menu and/or Desktop;
-- normal application startup through the launcher;
-- an optional configuration for automatic startup with the user's session.
+- `systemctl` with user-service support;
+- `curl`;
+- `xdg-open`.
 
-Final installation instructions will be added here after this stage is completed and validated.
+### Installation
+
+For a version published through GitHub Releases, download and extract the bundle, then run the installer from the extracted directory:
+
+```bash
+tar -xzf client-followup-linux-amd64.tar.gz
+cd client-followup-linux-amd64
+./install.sh
+```
+
+Installation is entirely user-level and **does not use `sudo`**. The application is added to the application menu as **Client Follow-up**.
+
+The `systemd --user` service starts on demand when the application is opened. It is not configured for session autostart.
+
+Application files are installed under:
+
+```text
+~/.local/share/client-followup/app/
+```
+
+The database is stored separately from the replaceable application files:
+
+```text
+~/.local/share/client-followup/data/client-followup.db
+```
+
+Backups and recovery points are stored under:
+
+```text
+~/.local/share/client-followup/backups/
+```
+
+## Backup and recovery
+
+The mechanism uses complete SQLite snapshots, not incremental backups.
+
+The normal recovery window keeps storage bounded:
+
+- **1 daily baseline** — `client-followup-YYYY-MM-DD.db`, representing the state at the first application start of the day;
+- **up to 3 rotating recovery snapshots** — `recent-1.db`, `recent-2.db` and `recent-3.db`, preserving states from before the latest persisted changes;
+- **1 pre-restore protection** — `pre-restore.db`, created during a restore to preserve the database that was active immediately before restoration.
+
+`recent-1` is the state immediately before the latest persisted change, followed by `recent-2` and `recent-3`.
+
+### Restoring a recovery point
+
+To display usage and the currently available recovery points:
+
+```bash
+~/.local/share/client-followup/restore-backup.sh
+```
+
+Restore examples:
+
+```bash
+~/.local/share/client-followup/restore-backup.sh recent-1
+~/.local/share/client-followup/restore-backup.sh recent-2
+~/.local/share/client-followup/restore-backup.sh recent-3
+~/.local/share/client-followup/restore-backup.sh daily
+~/.local/share/client-followup/restore-backup.sh 2026-08-20
+```
+
+The script validates the selected point, stops the service, preserves the active database as `pre-restore.db`, restores the snapshot, removes SQLite WAL/SHM files, restarts the service and waits for the `/health` endpoint to respond.
+
+After a successful restore, refresh the browser with `F5`. The state that existed immediately before restoration is also made available as `recent-1`, providing an immediate undo path for the restore itself.
+
+## Uninstall
+
+Run:
+
+```bash
+~/.local/share/client-followup/uninstall.sh
+```
+
+Uninstall removes the service, launcher, icon and executable application files, while **preserving the database and backups** under:
+
+```text
+~/.local/share/client-followup/
+```
 
 ## Quality
 
 The project includes automated tests for business rules and persistence, together with `go vet`, race-detector checks, JavaScript validation and GitHub Actions.
 
-The main workflows have also been manually validated in the browser, including client creation, search, duplicate-name resolution, phone flows, follow-up lifecycle operations, dashboard synchronization, reports, responsive layouts and printing.
+The main workflows have also been manually validated in the browser, including client creation, search, duplicate-name resolution, phone flows, follow-up lifecycle operations, dashboard synchronization, reports, responsive layouts and printing. The Linux distribution has also been validated end to end for user-level installation, launcher startup, data persistence, Backup & Recovery and uninstall with data preservation.
 
 ## S.C.A.L.E. Method
 
